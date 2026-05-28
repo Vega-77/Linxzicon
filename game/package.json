@@ -1,0 +1,17 @@
+{
+  "name": "linxicon-engine",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./src/index.js",
+  "exports": {
+    ".": {
+      "import": "./src/index.js",
+      "require": "./src/index.cjs"
+    }
+  },
+  "scripts": {
+    "build-data": "node scripts/build-data.js",
+    "create-sample": "node scripts/create-sample.js",
+    "test": "node test/engine.test.js"
+  }
+}
