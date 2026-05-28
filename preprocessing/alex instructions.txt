@@ -1,0 +1,6 @@
+https://www.kaggle.com/datasets/danielwillgeorge/glove6b100dtxt
+
+thats your dataset, download it and put it in this directory and rename it to data.txt
+
+then run GloveKBuilder.java
+
