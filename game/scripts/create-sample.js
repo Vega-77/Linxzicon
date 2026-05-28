@@ -13,13 +13,18 @@ import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const args = process.argv.slice(2);
-const outFile = resolve(__dirname, '..', argVal('--out') ?? 'data/sample.bin');
+
+// When imported as a module, use default path; when run directly, support --out flag.
+const isMain = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
+const args = isMain ? process.argv.slice(2) : [];
 
 function argVal(flag) {
   const i = args.indexOf(flag);
   return i !== -1 ? args[i + 1] : null;
 }
+
+export const DEFAULT_OUT = resolve(__dirname, '../data/sample.bin');
+const outFile = resolve(__dirname, '..', argVal('--out') ?? 'data/sample.bin');
 
 const DIMS = 100;
 
