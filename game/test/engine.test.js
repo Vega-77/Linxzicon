@@ -11,6 +11,7 @@
 import { strict as assert } from 'node:assert';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { existsSync } from 'node:fs';
 import { LinxiconEngine } from '../src/engine.js';
 import { loadEmbeddings }  from '../src/loader.js';
 
@@ -264,6 +265,13 @@ test('orphan word (no edges) is added to board', () => {
 console.log('\nloadEmbeddings');
 
 const samplePath = resolve(__dirname, '../data/sample.bin');
+
+// Auto-generate sample.bin if it doesn't exist (e.g. fresh clone)
+if (!existsSync(samplePath)) {
+  console.log('  sample.bin not found — generating...');
+  await import('../scripts/create-sample.js');
+  console.log('  done\n');
+}
 
 await asyncTest('loads sample.bin and returns a Map', async () => {
   const emb = await loadEmbeddings(samplePath);
