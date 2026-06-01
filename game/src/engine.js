@@ -52,6 +52,28 @@ export class LinxiconEngine {
     return _dot(e1.vec, e2.vec);
   }
 
+  /**
+   * Returns the cosine similarity between the two words and their adaptive threshold,
+   * useful for validating that a proposed word pair makes a reasonable game.
+   *
+   * A pair whose similarity already exceeds the threshold is a trivial game —
+   * players can win immediately by adding any word that's close to either.
+   * Recommended starting pairs have similarity well below the threshold.
+   *
+   * @returns {{ similarity: number, threshold: number, isTrivial: boolean } | null}
+   */
+  pairSimilarity(word1, word2, adaptiveK) {
+    const w1 = word1.toLowerCase();
+    const w2 = word2.toLowerCase();
+    const e1 = this._emb.get(w1);
+    const e2 = this._emb.get(w2);
+    if (!e1 || !e2) return null;
+    const k = adaptiveK ?? this._defaultK;
+    const similarity = _dot(e1.vec, e2.vec);
+    const threshold = _edgeThreshold(e1, e2, k);
+    return { similarity, threshold, isTrivial: similarity >= threshold };
+  }
+
   // ---------------------------------------------------------------------------
   // Game lifecycle
   // ---------------------------------------------------------------------------
@@ -84,14 +106,6 @@ export class LinxiconEngine {
       status: 'active',
       adaptiveK,
     };
-
-    // Check if start and target are already similar enough to be connected.
-    // If so, record the edge and mark as won immediately.
-    const sim = _dot(this._emb.get(s).vec, this._emb.get(t).vec);
-    const threshold = _edgeThreshold(this._emb.get(s), this._emb.get(t), adaptiveK);
-    if (sim >= threshold) {
-      return { ...state, edges: [[0, 1, sim]], status: 'won' };
-    }
 
     return state;
   }
