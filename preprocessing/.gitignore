@@ -1,0 +1,3 @@
+# GloVe source data — download via: curl -L -o glove.6B.zip https://downloads.cs.stanford.edu/nlp/data/glove.6B.zip
+*.zip
+data.txt
