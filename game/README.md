@@ -10,16 +10,17 @@ npm test
 
 The tests use a small built-in word set so they work right away without needing the full embeddings file.
 
-## Building the data file
+## Data files
 
-You need the GloVe dataset first (see `../preprocessing/README.md`). Then:
+`data/embeddings.bin` (~8MB, ~20k words at 100 dimensions) is committed so you can use it right away.
 
+`data/sample.bin` is a smaller synthetic file used by the tests.
+
+If you ever need to rebuild `embeddings.bin` from scratch (you probably don't):
 ```bash
-node scripts/build-data.js <path-to-glove-file>
-# output goes to data/embeddings.bin by default
+# download GloVe first — see ../preprocessing/README.md
+node scripts/build-data.js ../preprocessing/data.txt
 ```
-
-A small sample file (`data/sample.bin`) is already included for development and testing.
 
 ## Usage
 

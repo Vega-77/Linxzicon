@@ -22,10 +22,8 @@ npm test
 ```
 
 ### Building the full embeddings file
-Download the GloVe dataset (see `preprocessing/README.md`), then:
+The pre-built `game/data/embeddings.bin` (~8MB, ~20k words) is already committed so you don't need to do this. But if you want to rebuild it from scratch, download the GloVe dataset (see `preprocessing/README.md`) then:
 ```bash
 cd game
 node scripts/build-data.js ../preprocessing/data.txt
 ```
-
-This produces `game/data/embeddings.bin` (~8MB).
