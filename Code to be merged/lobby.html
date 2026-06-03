@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<!-- ============================================================
+     lobby.html
+     Main hub after login. Player can:
+       - Start a solo game
+       - Find a multiplayer match
+       - View their stats
+       - Log out
+     ============================================================ -->
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Linxicon — Lobby</title>
+    <link rel="stylesheet" href="css/style.css" />
+    <style>
+        .lobby-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 16px;
+            max-width: 700px;
+            width: 100%;
+            margin-top: 32px;
+        }
+        .lobby-card {
+            background: var(--bg2);
+            border: 1px solid var(--bg3);
+            border-radius: var(--radius);
+            padding: 28px 20px;
+            text-align: center;
+            cursor: pointer;
+            transition: border-color var(--transition), transform var(--transition);
+        }
+        .lobby-card:hover {
+            border-color: var(--accent);
+            transform: translateY(-2px);
+        }
+        .lobby-card .icon { font-size: 2.4rem; margin-bottom: 10px; }
+        .lobby-card h3    { margin-bottom: 6px; }
+        .lobby-card p     { font-size: 0.85rem; color: var(--text-muted); }
+
+        .elo-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: var(--bg2);
+            border: 1px solid var(--bg3);
+            border-radius: 20px;
+            padding: 6px 14px;
+            font-size: 0.9rem;
+            color: var(--gold);
+            font-weight: 600;
+            margin-top: 8px;
+        }
+    </style>
+</head>
+<body>
+
+<!-- Nav -->
+<nav class="navbar">
+    <span class="navbar-brand">Linxicon</span>
+    <div class="navbar-links">
+        <span id="nav-username" class="muted"></span>
+        <button class="btn btn-ghost" id="logout-btn">Log Out</button>
+    </div>
+</nav>
+
+<div class="page-center">
+    <div style="text-align:center;">
+        <h2>Welcome back, <span id="welcome-name">Player</span></h2>
+        <div class="elo-badge">⭐ Elo: <span id="welcome-elo">—</span></div>
+    </div>
+
+    <!-- Main menu cards -->
+    <div class="lobby-grid">
+
+        <div class="lobby-card" id="btn-solo">
+            <div class="icon">🧩</div>
+            <h3>Solo Game</h3>
+            <p>Practice connecting words at your own pace.</p>
+        </div>
+
+        <div class="lobby-card" id="btn-multi">
+            <div class="icon">⚔️</div>
+            <h3>Multiplayer</h3>
+            <p>Race against a matched opponent in real time.</p>
+        </div>
+
+        <div class="lobby-card" id="btn-stats">
+            <div class="icon">📊</div>
+            <h3>My Stats</h3>
+            <p>View your performance and match history.</p>
+        </div>
+
+    </div>
+</div>
+
+<script type="module">
+    import { requireAuth, logout }  from "./js/auth.js";
+    import { loadAccount }          from "./js/account.js";
+
+    // Redirect to login if not signed in
+    const user    = await requireAuth();
+    const account = await loadAccount(user.uid);
+
+    if (account) {
+        document.getElementById("welcome-name").textContent = account.username;
+        document.getElementById("welcome-elo").textContent  = account.elo;
+        document.getElementById("nav-username").textContent = account.username;
+    }
+
+    document.getElementById("btn-solo").addEventListener("click", () => {
+        window.location.href = "game.html?mode=solo";
+    });
+
+    document.getElementById("btn-multi").addEventListener("click", () => {
+        window.location.href = "game.html?mode=multi";
+    });
+
+    document.getElementById("btn-stats").addEventListener("click", () => {
+        window.location.href = "stats.html";
+    });
+
+    document.getElementById("logout-btn").addEventListener("click", async () => {
+        await logout();
+    });
+</script>
+</body>
+</html>

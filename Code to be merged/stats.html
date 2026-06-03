@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<!-- ============================================================
+     stats.html
+     Displays the logged-in player's statistics and match history.
+     Loads data via stats.js after auth is confirmed.
+     ============================================================ -->
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Linxicon — My Stats</title>
+    <link rel="stylesheet" href="css/style.css" />
+    <style>
+        .stats-page {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 24px 16px 48px;
+        }
+
+        .section-title {
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            margin: 28px 0 12px;
+        }
+
+        /* Avatar circle + username header */
+        .profile-header {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            margin-bottom: 4px;
+            flex-wrap: wrap;
+        }
+        .profile-avatar {
+            width: 52px;
+            height: 52px;
+            border-radius: 50%;
+            background: var(--accent);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: #fff;
+            flex-shrink: 0;
+        }
+
+        /* History table wrapper */
+        #history-container {
+            background: var(--bg2);
+            border: 1px solid var(--bg3);
+            border-radius: var(--radius);
+            overflow: hidden;
+        }
+    </style>
+</head>
+<body>
+
+<!-- Nav -->
+<nav class="navbar">
+    <span class="navbar-brand">Linxicon</span>
+    <div class="navbar-links">
+        <a href="lobby.html" class="btn btn-ghost">← Lobby</a>
+    </div>
+</nav>
+
+<div class="stats-page">
+
+    <!-- Profile header: avatar letter + username + Elo -->
+    <div class="profile-header">
+        <div class="profile-avatar" id="avatar-letter">?</div>
+        <div>
+            <h2 id="stat-username">Loading…</h2>
+            <span class="muted">
+                Elo: <strong id="stat-elo" style="color:var(--gold);">—</strong>
+            </span>
+        </div>
+    </div>
+
+    <!-- ── Stat cards ── -->
+    <p class="section-title">Overview</p>
+    <div class="stats-grid">
+
+        <div class="stat-card">
+            <div class="stat-value" id="stat-played">—</div>
+            <div class="stat-label">Games Played</div>
+        </div>
+
+        <div class="stat-card">
+            <div class="stat-value" id="stat-won" style="color:var(--green);">—</div>
+            <div class="stat-label">Wins</div>
+        </div>
+
+        <div class="stat-card">
+            <div class="stat-value" id="stat-lost" style="color:var(--red);">—</div>
+            <div class="stat-label">Losses</div>
+        </div>
+
+        <div class="stat-card">
+            <div class="stat-value" id="stat-winrate">—</div>
+            <div class="stat-label">Win Rate</div>
+        </div>
+
+        <div class="stat-card">
+            <div class="stat-value" id="stat-avg-words">—</div>
+            <div class="stat-label">Avg Words (wins)</div>
+        </div>
+
+        <div class="stat-card">
+            <div class="stat-value" id="stat-avg-time">—</div>
+            <div class="stat-label">Avg Solve Time</div>
+        </div>
+
+        <div class="stat-card">
+            <div class="stat-value" id="stat-streak" style="color:var(--gold);">—</div>
+            <div class="stat-label">Best Streak</div>
+        </div>
+
+        <div class="stat-card">
+            <div class="stat-value" id="stat-cur-streak">—</div>
+            <div class="stat-label">Current Streak</div>
+        </div>
+
+    </div>
+
+    <!-- ── Match history ── -->
+    <p class="section-title">Recent Matches (last 20)</p>
+    <div id="history-container">
+        <p class="no-history">Loading…</p>
+    </div>
+
+</div>
+
+<script type="module">
+    import { requireAuth }  from "./js/auth.js";
+    import { loadAccount }  from "./js/account.js";
+    import { loadStats }    from "./js/stats.js";
+
+    // Redirect to login if not signed in
+    const user    = await requireAuth();
+    const account = await loadAccount(user.uid);
+
+    // Set the avatar to the first letter of the username
+    if (account) {
+        document.getElementById("avatar-letter").textContent =
+            account.username.charAt(0).toUpperCase();
+    }
+
+    // Pass uid and account so stats.js doesn't fetch them again
+    await loadStats(user.uid, account);
+</script>
+</body>
+</html>

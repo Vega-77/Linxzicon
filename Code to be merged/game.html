@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<!-- ============================================================
+     game.html
+     The game board. Handles both solo and multiplayer.
+
+     URL params:
+       ?mode=solo   — single player
+       ?mode=multi  — real-time multiplayer via Firebase
+
+     The two modes share the same HTML; JavaScript reads the
+     URL param and branches into the appropriate session class.
+     ============================================================ -->
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Linxicon — Play</title>
+    <link rel="stylesheet" href="css/style.css" />
+    <style>
+        .game-layout {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 16px;
+            gap: 12px;
+        }
+
+        /* Top bar: target words on the left, word count + timer on the right */
+        .game-info-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            width: 100%;
+            max-width: 900px;
+            background: var(--bg2);
+            border: 1px solid var(--bg3);
+            border-radius: var(--radius);
+            padding: 12px 20px;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .target-words {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 1rem;
+            font-weight: 600;
+        }
+        .word-tag {
+            background: var(--bg3);
+            border-radius: 6px;
+            padding: 4px 12px;
+        }
+        .word-tag.start,
+        .word-tag.end { color: var(--gold); border: 1px solid var(--gold); }
+        .arrow        { color: var(--text-muted); }
+
+        /* Shown only in multiplayer — opponent's word count */
+        #opponent-bar {
+            display: none;
+            width: 100%;
+            max-width: 900px;
+            background: var(--bg2);
+            border: 1px solid var(--bg3);
+            border-radius: var(--radius);
+            padding: 10px 20px;
+            font-size: 0.9rem;
+            color: var(--text-muted);
+        }
+        #opponent-bar.visible { display: block; }
+
+        /* One-line status below the canvas */
+        #status-msg { font-size: 0.9rem; color: var(--text-muted); min-height: 20px; }
+        #status-msg.error   { color: var(--red);   }
+        #status-msg.success { color: var(--green); }
+        #status-msg.info    { color: #a5b4fc;      }
+    </style>
+</head>
+<body>
+
+<!-- Nav -->
+<nav class="navbar">
+    <span class="navbar-brand">Linxicon</span>
+    <div class="navbar-links">
+        <span id="mode-badge" class="muted"></span>
+        <button class="btn btn-ghost" id="back-btn">← Lobby</button>
+    </div>
+</nav>
+
+<!-- ══════════════════════════════════════════════════════════
+     MATCHMAKING SCREEN (multiplayer only)
+     Shown while searching for an opponent.
+     Hidden once a match is found.
+════════════════════════════════════════════════════════════ -->
+<div id="matchmaking-screen" style="display:none;">
+    <div class="page-center">
+        <div class="lobby-status">
+            <div class="spinner"></div>
+            <p id="matchmaking-msg">Looking for an opponent…</p>
+            <button class="btn btn-ghost" id="cancel-search-btn" style="margin-top:16px;">
+                Cancel
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     GAME SCREEN
+     Hidden until the game starts (immediately for solo,
+     after match is found for multiplayer).
+════════════════════════════════════════════════════════════ -->
+<div id="game-screen" style="display:none;">
+    <div class="game-layout">
+
+        <!-- Info bar -->
+        <div class="game-info-bar">
+            <div class="target-words">
+                <span class="word-tag start" id="start-word-tag">—</span>
+                <span class="arrow">→</span>
+                <span class="word-tag end"   id="end-word-tag">—</span>
+            </div>
+            <div style="display:flex; gap:20px; align-items:center;">
+                <span class="muted">Words: <strong id="word-count">2</strong></span>
+                <span class="timer" id="timer">0:00</span>
+            </div>
+        </div>
+
+        <!-- Opponent bar (multiplayer) -->
+        <div id="opponent-bar">
+            Opponent: <strong id="opponent-name">—</strong>
+            &nbsp;|&nbsp;
+            Their words: <strong id="opponent-word-count">0</strong>
+        </div>
+
+        <!-- Canvas + win overlay -->
+        <div class="canvas-wrapper">
+            <canvas id="game-canvas" width="900" height="520"></canvas>
+
+            <div class="win-overlay" id="win-overlay">
+                <h2 id="win-title">You connected them! 🎉</h2>
+                <p  id="win-details"></p>
+                <div style="display:flex; gap:12px; flex-wrap:wrap; justify-content:center;">
+                    <button class="btn btn-success" id="play-again-btn">Play Again</button>
+                    <button class="btn btn-ghost"   id="go-lobby-btn">Back to Lobby</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Word input row -->
+        <div class="word-input-row">
+            <input  type="text" id="word-input"
+                    placeholder="Type a word and press Enter…"
+                    autocomplete="off" autocorrect="off" spellcheck="false" />
+            <button class="btn btn-primary" id="submit-word-btn">Add Word</button>
+        </div>
+
+        <!-- Status message -->
+        <div id="status-msg"></div>
+
+    </div>
+</div>
+
+<script type="module">
+    import { requireAuth }        from "./js/auth.js";
+    import { loadGlove }          from "./js/glove.js";
+    import { Graph }              from "./js/graph.js";
+    import { Renderer }           from "./js/render.js";
+    import { GameSession }        from "./js/game.js";
+    import { MultiplayerSession } from "./js/multiplayer.js";
+
+    // ── Determine game mode from URL param ──
+    const params = new URLSearchParams(window.location.search);
+    const mode   = params.get("mode") === "multi" ? "multi" : "solo";
+    document.getElementById("mode-badge").textContent =
+        mode === "multi" ? "⚔️ Multiplayer" : "🧩 Solo";
+
+    // ── Auth guard — redirects to index.html if not logged in ──
+    await requireAuth();
+
+    // ── Load GloVe neighbor data ──
+    // This must complete before any word can be submitted.
+    await loadGlove("glove_top25.txt");
+
+    // ── Canvas + renderer setup ──
+    const canvas   = document.getElementById("game-canvas");
+    const graph    = new Graph();
+    const renderer = new Renderer(canvas, graph);
+
+    // ══════════════════════════════════════════════
+    // UI Helpers
+    // ══════════════════════════════════════════════
+
+    // Show a one-line status message below the canvas
+    function setStatus(text, type = "") {
+        const el    = document.getElementById("status-msg");
+        el.textContent = text;
+        el.className   = type;
+    }
+
+    // Update the word count badge in the info bar
+    function refreshWordCount() {
+        document.getElementById("word-count").textContent =
+            gameSession.graph.wordCount;
+    }
+
+    // ── Timer ──
+    let timerInterval = null;
+    let timerSeconds  = 0;
+
+    function startTimer() {
+        timerSeconds = 0;
+        clearInterval(timerInterval); // safety — clear any stale timer
+        timerInterval = setInterval(() => {
+            timerSeconds++;
+            const m = Math.floor(timerSeconds / 60);
+            const s = String(timerSeconds % 60).padStart(2, "0");
+            document.getElementById("timer").textContent = `${m}:${s}`;
+        }, 1000);
+    }
+
+    function stopTimer() { clearInterval(timerInterval); }
+
+    // Format seconds as "Xm Ys" or "Ys"
+    function formatTime(s) {
+        if (s < 60) return `${s}s`;
+        return `${Math.floor(s / 60)}m ${s % 60}s`;
+    }
+
+    // Show the win/loss overlay
+    function showOverlay(title, details) {
+        stopTimer();
+        document.getElementById("win-title").textContent   = title;
+        document.getElementById("win-details").textContent = details;
+        document.getElementById("win-overlay").classList.add("visible");
+    }
+
+    // ══════════════════════════════════════════════
+    // Word submission (shared by both modes)
+    // ══════════════════════════════════════════════
+    async function handleSubmit() {
+        const input = document.getElementById("word-input");
+        const word  = input.value.trim();
+        input.value = "";
+        input.focus();
+        if (!word) return;
+
+        // submitWord is either gameSession.submitWord or
+        // multiSession.submitWord depending on mode — see below
+        const result = await activeSubmit(word);
+
+        if (result.error) {
+            setStatus(result.error, "error");
+            return;
+        }
+
+        refreshWordCount();
+
+        if (result.connections.length === 0) {
+            setStatus(`"${result.added}" added — no connections yet.`);
+        } else {
+            setStatus(
+                `"${result.added}" connected to: ${result.connections.join(", ")}`,
+                "success"
+            );
+        }
+    }
+
+    document.getElementById("submit-word-btn")
+        .addEventListener("click", handleSubmit);
+    document.getElementById("word-input")
+        .addEventListener("keydown", (e) => { if (e.key === "Enter") handleSubmit(); });
+
+    // ══════════════════════════════════════════════
+    // SOLO MODE
+    // ══════════════════════════════════════════════
+
+    // gameSession is declared here so it is accessible in both
+    // the solo and multiplayer branches AND in handleSubmit above.
+    let gameSession;
+    let activeSubmit; // function reference used by handleSubmit
+
+    if (mode === "solo") {
+        document.getElementById("game-screen").style.display = "block";
+
+        gameSession = new GameSession(
+            canvas,
+            renderer,
+            // onWin
+            async (wordsAdded, solveTime) => {
+                showOverlay(
+                    "You connected them! 🎉",
+                    `${wordsAdded} word${wordsAdded !== 1 ? "s" : ""} · ${formatTime(solveTime)}`
+                );
+                await gameSession.saveResult(true, null);
+            },
+            // onMsg
+            (msg) => setStatus(msg, "info")
+        );
+
+        // Point activeSubmit at the solo session
+        activeSubmit = (word) => gameSession.submitWord(word);
+
+        const { startWord, endWord } = gameSession.init();
+        document.getElementById("start-word-tag").textContent = startWord;
+        document.getElementById("end-word-tag").textContent   = endWord;
+        startTimer();
+
+    // ══════════════════════════════════════════════
+    // MULTIPLAYER MODE
+    // ══════════════════════════════════════════════
+    } else {
+        document.getElementById("matchmaking-screen").style.display = "block";
+
+        // GameSession handles local graph logic.
+        // Its onWin callback is intentionally a no-op because
+        // MultiplayerSession handles the win flow instead.
+        gameSession = new GameSession(
+            canvas,
+            renderer,
+            () => {}, // onWin handled by MultiplayerSession
+            (msg) => setStatus(msg, "info")
+        );
+
+        const multiSession = new MultiplayerSession(
+            renderer,
+            gameSession,
+
+            // onMatchFound — hide matchmaking screen, show game
+            ({ startWord, endWord, opponentName }) => {
+                document.getElementById("matchmaking-screen").style.display = "none";
+                document.getElementById("game-screen").style.display        = "block";
+
+                document.getElementById("start-word-tag").textContent = startWord;
+                document.getElementById("end-word-tag").textContent   = endWord;
+
+                document.getElementById("opponent-bar").classList.add("visible");
+                document.getElementById("opponent-name").textContent = opponentName;
+
+                refreshWordCount();
+                startTimer();
+                setStatus(`Connect "${startWord}" → "${endWord}"`);
+            },
+
+            // onOpponentWord — opponent added a word; update their count
+            (word) => {
+                const el = document.getElementById("opponent-word-count");
+                el.textContent = parseInt(el.textContent || "0") + 1;
+                setStatus(`Opponent added: "${word}"`, "info");
+            },
+
+            // onGameOver — fired on BOTH clients when status="finished"
+            async ({ won, opponentElo }) => {
+                if (won) {
+                    showOverlay(
+                        "You connected them! 🎉",
+                        `${gameSession.wordsAdded} word${gameSession.wordsAdded !== 1 ? "s" : ""} · ${formatTime(gameSession.getElapsed())}`
+                    );
+                    // Win already saved in multiSession.submitWord; no duplicate save needed
+                } else {
+                    showOverlay("Opponent won 😔", "Better luck next time!");
+                    // Save our loss — opponent already saved their win
+                    await gameSession.saveResult(false, opponentElo);
+                }
+            },
+
+            // onMessage — shown in matchmaking screen
+            (msg) => {
+                document.getElementById("matchmaking-msg").textContent = msg;
+            }
+        );
+
+        // Point activeSubmit at the multiplayer session
+        activeSubmit = (word) => multiSession.submitWord(word);
+
+        // Start matchmaking
+        multiSession.findMatch();
+
+        // Cancel button during matchmaking
+        document.getElementById("cancel-search-btn")
+            .addEventListener("click", async () => {
+                await multiSession.cancelSearch();
+                window.location.href = "lobby.html";
+            });
+
+        // Clean up Firebase listeners when the user navigates away
+        window.addEventListener("beforeunload", () => multiSession.cleanup());
+    }
+
+    // ── Navigation buttons ──
+    document.getElementById("back-btn")
+        .addEventListener("click", () => { window.location.href = "lobby.html"; });
+    document.getElementById("go-lobby-btn")
+        .addEventListener("click", () => { window.location.href = "lobby.html"; });
+    document.getElementById("play-again-btn")
+        .addEventListener("click", () => { window.location.reload(); });
+</script>
+</body>
+</html>
