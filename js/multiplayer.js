@@ -191,24 +191,7 @@ export class MultiplayerSession {
     // Seeds the local GameSession with the agreed start/end words.
     // ----------------------------------------------------------
     _initLocalBoard(startWord, endWord, opponentName) {
-        this.gameSession.graph = this.gameSession.graph.constructor
-            ? new (this.gameSession.graph.constructor)()
-            : this.gameSession.graph;
-
-        // Directly add the two starting nodes (no glove lookup needed)
-        this.gameSession.graph.addNode(startWord, []);
-        this.gameSession.graph.addNode(endWord,   []);
-        this.gameSession.startWord  = startWord;
-        this.gameSession.endWord    = endWord;
-        this.gameSession._startTime = Date.now();
-        this.gameSession.finished   = false;
-        this.gameSession.wordsAdded = 0;
-
-        this.renderer.graph = this.gameSession.graph;
-        this.renderer.setStartEnd(startWord, endWord);
-        this.renderer.setWinningPath(null);
-        this.renderer.start();
-
+        this.gameSession.initWords(startWord, endWord);
         this.onMatchFound({ gameId: this.gameId, startWord, endWord, opponentName });
     }
 
