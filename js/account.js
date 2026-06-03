@@ -1,68 +1,87 @@
 // ============================================================
 // account.js
-// Defines the Account class and all Firebase read/write
-// operations related to user profiles and statistics.
+// Account class and all Firebase read/write for user profiles.
+//
+// Stats are split into solo and multiplayer buckets so each
+// mode has its own games played / won / lost / averages.
+// Elo only changes in multiplayer games.
 // ============================================================
 
 import { database }                    from "./firebase-config.js";
 import { ref, set, get, update, push } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
 
-// Default Elo rating assigned to every new player
 const DEFAULT_ELO = 1000;
 
 // ============================================================
 // Account
-// Mirrors what is stored in Firebase under /users/{uid}.
-// All fields have safe defaults so a partial DB record
-// never causes undefined errors.
 // ============================================================
 export class Account {
-    constructor({
-        uid, username, email,
-        elo, gamesPlayed, gamesWon, gamesLost,
-        avgWordsUsed, avgSolveTime, winStreak, currentStreak
-    }) {
-        this.uid           = uid;
-        this.username      = username;
-        this.email         = email;
-        this.elo           = elo           ?? DEFAULT_ELO;
-        this.gamesPlayed   = gamesPlayed   ?? 0;
-        this.gamesWon      = gamesWon      ?? 0;
-        this.gamesLost     = gamesLost     ?? 0;
-        this.avgWordsUsed  = avgWordsUsed  ?? 0; // rolling avg words used per win
-        this.avgSolveTime  = avgSolveTime  ?? 0; // rolling avg seconds per win
-        this.winStreak     = winStreak     ?? 0; // all-time best win streak
-        this.currentStreak = currentStreak ?? 0; // current active streak
+    constructor(data) {
+        const d = data ?? {};
+        this.uid      = d.uid;
+        this.username = d.username;
+        this.email    = d.email;
+        this.elo      = d.elo ?? DEFAULT_ELO;
+
+        // ── Solo stats ──
+        this.soloPlayed   = d.soloPlayed   ?? 0;
+        this.soloWon      = d.soloWon      ?? 0;
+        this.soloAvgWords = d.soloAvgWords ?? 0;
+        this.soloAvgTime  = d.soloAvgTime  ?? 0;
+        this.soloBestTime = d.soloBestTime ?? 0; // fastest solo win in seconds
+
+        // ── Multiplayer stats ──
+        this.multiPlayed      = d.multiPlayed      ?? 0;
+        this.multiWon         = d.multiWon         ?? 0;
+        this.multiLost        = d.multiLost        ?? 0;
+        this.multiAvgWords    = d.multiAvgWords    ?? 0;
+        this.multiAvgTime     = d.multiAvgTime     ?? 0;
+        this.winStreak        = d.winStreak        ?? 0;
+        this.currentStreak    = d.currentStreak    ?? 0;
     }
 
-    // Win rate as a percentage string, e.g. "62.5%"
-    get winRate() {
-        if (this.gamesPlayed === 0) return "0%";
-        return ((this.gamesWon / this.gamesPlayed) * 100).toFixed(1) + "%";
+    get soloWinRate() {
+        if (this.soloPlayed === 0) return "0%";
+        return ((this.soloWon / this.soloPlayed) * 100).toFixed(1) + "%";
     }
 
-    // Plain object for writing to Firebase
+    get multiWinRate() {
+        if (this.multiPlayed === 0) return "0%";
+        return ((this.multiWon / this.multiPlayed) * 100).toFixed(1) + "%";
+    }
+
+    // Keep backward-compat helpers used by lobby.html
+    get gamesPlayed() { return this.soloPlayed + this.multiPlayed; }
+    get gamesWon()    { return this.soloWon    + this.multiWon; }
+    get gamesLost()   { return this.multiLost; }
+    get avgWordsUsed(){ return this.soloWon > 0 ? this.soloAvgWords : this.multiAvgWords; }
+    get avgSolveTime(){ return this.soloWon > 0 ? this.soloAvgTime  : this.multiAvgTime;  }
+    get winRate()     { return this.multiWinRate; }
+
     toObject() {
         return {
             uid:           this.uid,
             username:      this.username,
             email:         this.email,
             elo:           this.elo,
-            gamesPlayed:   this.gamesPlayed,
-            gamesWon:      this.gamesWon,
-            gamesLost:     this.gamesLost,
-            avgWordsUsed:  this.avgWordsUsed,
-            avgSolveTime:  this.avgSolveTime,
+            soloPlayed:    this.soloPlayed,
+            soloWon:       this.soloWon,
+            soloAvgWords:  this.soloAvgWords,
+            soloAvgTime:   this.soloAvgTime,
+            soloBestTime:  this.soloBestTime,
+            multiPlayed:   this.multiPlayed,
+            multiWon:      this.multiWon,
+            multiLost:     this.multiLost,
+            multiAvgWords: this.multiAvgWords,
+            multiAvgTime:  this.multiAvgTime,
             winStreak:     this.winStreak,
-            currentStreak: this.currentStreak
+            currentStreak: this.currentStreak,
         };
     }
 }
 
 // ============================================================
-// createAccount
-// Writes a brand-new Account to /users/{uid}.
-// Called once immediately after Firebase Auth registration.
+// createAccount — called once on registration
 // ============================================================
 export async function createAccount(uid, username, email) {
     const account = new Account({ uid, username, email });
@@ -72,65 +91,46 @@ export async function createAccount(uid, username, email) {
 
 // ============================================================
 // loadAccount
-// Reads a user's account from /users/{uid}.
-// Returns an Account instance, or null if not found.
 // ============================================================
 export async function loadAccount(uid) {
-    const snapshot = await get(ref(database, `users/${uid}`));
-    if (!snapshot.exists()) return null;
-    return new Account(snapshot.val());
+    const snap = await get(ref(database, `users/${uid}`));
+    if (!snap.exists()) return null;
+    return new Account(snap.val());
 }
 
 // ============================================================
 // saveGameResult
-// Called at the end of every game (win or loss).
-// Updates counters, rolling averages, streak, and Elo.
-//
-//   uid         — Firebase UID of the player to update
-//   won         — true if this player won
-//   wordsUsed   — words the player added to the graph
-//   solveTime   — seconds taken (0 if they lost)
-//   opponentElo — opponent's Elo for multiplayer Elo calc;
-//                 pass null for solo games (Elo unchanged)
+// isSolo: true for solo games, false for multiplayer
 // ============================================================
 export async function saveGameResult(uid, won, wordsUsed, solveTime, opponentElo = null) {
+    // Determine mode from whether opponentElo was provided
+    const isSolo = opponentElo === null;
+    return isSolo
+        ? _saveSoloResult(uid, won, wordsUsed, solveTime)
+        : _saveMultiResult(uid, won, wordsUsed, solveTime, opponentElo);
+}
+
+async function _saveSoloResult(uid, won, wordsUsed, solveTime) {
     const account = await loadAccount(uid);
     if (!account) return;
 
-    // ── Basic counters ──
-    account.gamesPlayed++;
+    account.soloPlayed++;
 
     if (won) {
-        account.gamesWon++;
-        account.currentStreak++;
-        if (account.currentStreak > account.winStreak) {
-            account.winStreak = account.currentStreak;
-        }
-    } else {
-        account.gamesLost++;
-        account.currentStreak = 0;
+        account.soloWon++;
+        const wins = account.soloWon;
+        if (wordsUsed > 0)
+            account.soloAvgWords = ((account.soloAvgWords * (wins - 1)) + wordsUsed) / wins;
+        if (solveTime > 0)
+            account.soloAvgTime  = ((account.soloAvgTime  * (wins - 1)) + solveTime)  / wins;
+        if (account.soloBestTime === 0 || solveTime < account.soloBestTime)
+            account.soloBestTime = solveTime;
     }
 
-    // ── Rolling averages (only updated on a win) ──
-    // Formula: newAvg = ((oldAvg * (wins - 1)) + newValue) / wins
-    // We read gamesWon AFTER incrementing above, so wins >= 1 here.
-    if (won && wordsUsed > 0) {
-        const wins = account.gamesWon;
-        account.avgWordsUsed = ((account.avgWordsUsed * (wins - 1)) + wordsUsed) / wins;
-        account.avgSolveTime = ((account.avgSolveTime * (wins - 1)) + solveTime)  / wins;
-    }
-
-    // ── Elo (multiplayer only) ──
-    if (opponentElo !== null) {
-        account.elo = calculateElo(account.elo, opponentElo, won);
-    }
-
-    // ── Write updated profile back ──
     await update(ref(database, `users/${uid}`), account.toObject());
-
-    // ── Append match history entry ──
     await push(ref(database, `users/${uid}/history`), {
         date:      new Date().toISOString(),
+        mode:      "solo",
         won,
         wordsUsed,
         solveTime,
@@ -140,17 +140,44 @@ export async function saveGameResult(uid, won, wordsUsed, solveTime, opponentElo
     return account;
 }
 
-// ============================================================
-// calculateElo
-// Standard Elo formula with K=32.
-// Returns the player's new integer Elo rating.
-//
-// expected = probability of winning given the rating gap
-// actual   = 1 (win) or 0 (loss)
-// ============================================================
-function calculateElo(playerElo, opponentElo, won) {
+async function _saveMultiResult(uid, won, wordsUsed, solveTime, opponentElo) {
+    const account = await loadAccount(uid);
+    if (!account) return;
+
+    account.multiPlayed++;
+
+    if (won) {
+        account.multiWon++;
+        account.currentStreak++;
+        if (account.currentStreak > account.winStreak)
+            account.winStreak = account.currentStreak;
+        const wins = account.multiWon;
+        if (wordsUsed > 0)
+            account.multiAvgWords = ((account.multiAvgWords * (wins - 1)) + wordsUsed) / wins;
+        if (solveTime > 0)
+            account.multiAvgTime  = ((account.multiAvgTime  * (wins - 1)) + solveTime)  / wins;
+    } else {
+        account.multiLost++;
+        account.currentStreak = 0;
+    }
+
+    account.elo = _calcElo(account.elo, opponentElo, won);
+
+    await update(ref(database, `users/${uid}`), account.toObject());
+    await push(ref(database, `users/${uid}/history`), {
+        date:      new Date().toISOString(),
+        mode:      "multiplayer",
+        won,
+        wordsUsed,
+        solveTime,
+        eloAtTime: account.elo
+    });
+
+    return account;
+}
+
+function _calcElo(playerElo, opponentElo, won) {
     const K        = 32;
     const expected = 1 / (1 + Math.pow(10, (opponentElo - playerElo) / 400));
-    const actual   = won ? 1 : 0;
-    return Math.round(playerElo + K * (actual - expected));
+    return Math.round(playerElo + K * ((won ? 1 : 0) - expected));
 }
