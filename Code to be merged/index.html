@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<!-- ============================================================
+     index.html
+     Landing page. Shows login form by default.
+     User can toggle to the register form.
+     On successful login/register, redirects to lobby.html.
+     ============================================================ -->
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Linxicon</title>
+    <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+<div class="page-center">
+
+    <!-- Brand -->
+    <div style="text-align:center; margin-bottom:28px;">
+        <h1>Linxicon</h1>
+        <p class="muted">Connect words. Beat your opponent.</p>
+    </div>
+
+    <!-- ── LOGIN FORM ── -->
+    <div class="card" id="login-card">
+        <h2 style="margin-bottom:20px;">Sign In</h2>
+
+        <div class="form-group">
+            <label for="login-email">Email</label>
+            <input type="email" id="login-email" placeholder="you@example.com" />
+        </div>
+
+        <div class="form-group">
+            <label for="login-password">Password</label>
+            <input type="password" id="login-password" placeholder="••••••••" />
+        </div>
+
+        <button class="btn btn-primary btn-full" id="login-btn">Sign In</button>
+
+        <div class="message" id="login-msg"></div>
+
+        <p class="muted" style="margin-top:18px; text-align:center;">
+            No account?
+            <a href="#" id="show-register">Create one</a>
+        </p>
+    </div>
+
+    <!-- ── REGISTER FORM (hidden by default) ── -->
+    <div class="card" id="register-card" style="display:none;">
+        <h2 style="margin-bottom:20px;">Create Account</h2>
+
+        <div class="form-group">
+            <label for="reg-username">Username</label>
+            <input type="text" id="reg-username" placeholder="wordwizard99" />
+        </div>
+
+        <div class="form-group">
+            <label for="reg-email">Email</label>
+            <input type="email" id="reg-email" placeholder="you@example.com" />
+        </div>
+
+        <div class="form-group">
+            <label for="reg-password">Password</label>
+            <input type="password" id="reg-password" placeholder="min 6 characters" />
+        </div>
+
+        <button class="btn btn-primary btn-full" id="register-btn">Create Account</button>
+
+        <div class="message" id="register-msg"></div>
+
+        <p class="muted" style="margin-top:18px; text-align:center;">
+            Already have an account?
+            <a href="#" id="show-login">Sign in</a>
+        </p>
+    </div>
+
+</div>
+
+<script type="module">
+    import { login, register, onAuthChange } from "./js/auth.js";
+
+    // If already logged in, skip straight to lobby
+    onAuthChange((user) => {
+        if (user) window.location.href = "lobby.html";
+    });
+
+    // Toggle between login and register forms
+    document.getElementById("show-register").addEventListener("click", (e) => {
+        e.preventDefault();
+        document.getElementById("login-card").style.display    = "none";
+        document.getElementById("register-card").style.display = "block";
+    });
+
+    document.getElementById("show-login").addEventListener("click", (e) => {
+        e.preventDefault();
+        document.getElementById("register-card").style.display = "none";
+        document.getElementById("login-card").style.display    = "block";
+    });
+
+    // Helper to show a message under a form
+    function showMsg(id, text, type) {
+        const el = document.getElementById(id);
+        el.textContent = text;
+        el.className   = `message visible ${type}`;
+    }
+
+    // ── Login ──
+    document.getElementById("login-btn").addEventListener("click", async () => {
+        const email    = document.getElementById("login-email").value.trim();
+        const password = document.getElementById("login-password").value;
+        const btn      = document.getElementById("login-btn");
+
+        btn.disabled = true;
+        btn.textContent = "Signing in…";
+
+        try {
+            await login(email, password);
+            window.location.href = "lobby.html";
+        } catch (err) {
+            showMsg("login-msg", friendlyError(err.message), "error");
+            btn.disabled = false;
+            btn.textContent = "Sign In";
+        }
+    });
+
+    // ── Register ──
+    document.getElementById("register-btn").addEventListener("click", async () => {
+        const username = document.getElementById("reg-username").value.trim();
+        const email    = document.getElementById("reg-email").value.trim();
+        const password = document.getElementById("reg-password").value;
+        const btn      = document.getElementById("register-btn");
+
+        btn.disabled = true;
+        btn.textContent = "Creating account…";
+
+        try {
+            await register(username, email, password);
+            window.location.href = "lobby.html";
+        } catch (err) {
+            showMsg("register-msg", friendlyError(err.message), "error");
+            btn.disabled = false;
+            btn.textContent = "Create Account";
+        }
+    });
+
+    // Allow pressing Enter to submit
+    ["login-email","login-password"].forEach(id => {
+        document.getElementById(id).addEventListener("keydown", (e) => {
+            if (e.key === "Enter") document.getElementById("login-btn").click();
+        });
+    });
+    ["reg-username","reg-email","reg-password"].forEach(id => {
+        document.getElementById(id).addEventListener("keydown", (e) => {
+            if (e.key === "Enter") document.getElementById("register-btn").click();
+        });
+    });
+
+    // Convert Firebase error codes to friendlier messages
+    function friendlyError(msg) {
+        if (msg.includes("user-not-found"))   return "No account found with that email.";
+        if (msg.includes("wrong-password"))   return "Incorrect password.";
+        if (msg.includes("email-already"))    return "An account with this email already exists.";
+        if (msg.includes("weak-password"))    return "Password must be at least 6 characters.";
+        if (msg.includes("invalid-email"))    return "Please enter a valid email address.";
+        return "Something went wrong. Please try again.";
+    }
+</script>
+</body>
+</html>
