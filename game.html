@@ -180,7 +180,7 @@
 
     // ── Load GloVe neighbor data ──
     // This must complete before any word can be submitted.
-    await loadGlove("glove_top25.txt");
+    await loadGlove("game/data/embeddings.bin");
 
     // ── Canvas + renderer setup ──
     const canvas   = document.getElementById("game-canvas");
