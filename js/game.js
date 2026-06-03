@@ -4,21 +4,22 @@
 //
 // GameSession manages one round:
 //   - Picks start/end words
-//   - Handles word submission + edge creation
-//   - Checks the win condition via BFS
+//   - Uses LinxiconEngine (via glove.js) for word validation,
+//     edge detection, and win detection
+//   - Keeps a Graph (graph.js) in sync purely for rendering
 //   - Saves results to Firebase via account.js
 // ============================================================
 
-import { Graph }                         from "./graph.js";
-import { getConnections, isInVocabulary } from "./glove.js";
-import { saveGameResult }                 from "./account.js";
-import { requireAuth }                    from "./auth.js";
+import { Graph }          from "./graph.js";
+import { getEngine }      from "./glove.js";
+import { saveGameResult } from "./account.js";
+import { requireAuth }    from "./auth.js";
 
 // ============================================================
 // WORD_BANK
 // Curated words guaranteed to exist in the GloVe vocabulary.
-// Two are chosen at random as the start and end words for
-// each game. Expand this list to increase variety.
+// Pairs are chosen at random; trivial pairs (words already
+// similar enough to connect directly) are skipped.
 // ============================================================
 const WORD_BANK = [
     "ocean", "forest", "music", "castle", "diamond",
@@ -48,10 +49,12 @@ export class GameSession {
         this.onMsg    = onMsg;
 
         this.graph      = null;
+        this.engine     = null;
+        this.boardState = null;
         this.startWord  = null;
         this.endWord    = null;
         this._startTime = null;
-        this.wordsAdded = 0;    // words typed by the player (excludes the 2 starting words)
+        this.wordsAdded = 0;
         this.finished   = false;
     }
 
@@ -62,27 +65,45 @@ export class GameSession {
     // Returns { startWord, endWord } so the UI can display them.
     // ----------------------------------------------------------
     init() {
+        const [w1, w2] = pickStartPair();
+        return this._setup(w1, w2);
+    }
+
+    // ----------------------------------------------------------
+    // initWords
+    // Sets up a board with specific start/end words.
+    // Used by multiplayer so both players share the same pair.
+    // ----------------------------------------------------------
+    initWords(startWord, endWord) {
+        return this._setup(startWord, endWord);
+    }
+
+    // ----------------------------------------------------------
+    // _setup  (private)
+    // Common initialisation for both init() and initWords().
+    // ----------------------------------------------------------
+    _setup(startWord, endWord) {
+        this.engine     = getEngine();
         this.graph      = new Graph();
         this.finished   = false;
         this.wordsAdded = 0;
         this._startTime = Date.now();
 
-        const [w1, w2]  = pickTwoRandom(WORD_BANK);
-        this.startWord  = w1;
-        this.endWord    = w2;
+        this.startWord  = startWord;
+        this.endWord    = endWord;
+        this.boardState = this.engine.createGame(startWord, endWord);
 
-        // Place both starting words on the board with no edges yet
-        this.graph.addNode(w1, []);
-        this.graph.addNode(w2, []);
+        // Seed the visual graph with the two endpoint nodes
+        this.graph.addNode(startWord, []);
+        this.graph.addNode(endWord,   []);
 
-        // Point the renderer at this session's graph
         this.renderer.graph = this.graph;
-        this.renderer.setStartEnd(w1, w2);
+        this.renderer.setStartEnd(startWord, endWord);
         this.renderer.setWinningPath(null);
         this.renderer.start();
 
-        this.onMsg(`Connect "${w1}" → "${w2}"`);
-        return { startWord: w1, endWord: w2 };
+        this.onMsg(`Connect "${startWord}" → "${endWord}"`);
+        return { startWord, endWord };
     }
 
     // ----------------------------------------------------------
@@ -90,7 +111,7 @@ export class GameSession {
     // Validates and adds a word to the board.
     // Checks the win condition after every addition.
     //
-    // Returns an object:
+    // Returns:
     //   { added, connections, won }  — on success
     //   { error }                    — on validation failure
     // ----------------------------------------------------------
@@ -98,46 +119,35 @@ export class GameSession {
         if (this.finished) return { error: "Game is already over." };
 
         const word = rawInput.trim().toLowerCase();
-
         if (!word)            return { error: "Please type a word." };
         if (word.length <= 3) return { error: "Word must be more than 3 letters." };
 
-        if (!isInVocabulary(word)) {
-            return { error: `"${word}" is not in the vocabulary.` };
+        const { state: newState, result } = this.engine.addWord(this.boardState, word);
+
+        if (!result.accepted) {
+            if (result.reason === 'unknown_word')    return { error: `"${word}" is not in the vocabulary.` };
+            if (result.reason === 'already_on_board') return { error: `"${word}" is already on the board.` };
         }
 
-        if (this.graph.hasNode(word)) {
-            return { error: `"${word}" is already on the board.` };
-        }
+        this.boardState = newState;
 
-        // Ask glove.js which board words this new word connects to
-        const connections = getConnections(word, this.graph.getBoardWords());
-
-        // Add node and edges to the graph
+        // Extract connected word names and sync to the visual graph
+        const connections = result.newEdges.map(([a, b]) => a === word ? b : a);
         this.graph.addNode(word, connections);
         this.wordsAdded++;
 
-        // Check win: is there a path from startWord to endWord?
-        const won = this.graph.isConnected(this.startWord, this.endWord);
-
-        if (won) {
+        if (result.won) {
             this.finished = true;
-            const solveTime = this.getElapsed();
-
-            // Highlight the winning path in green
-            const path = this.graph.getPath(this.startWord, this.endWord);
-            this.renderer.setWinningPath(path);
-
-            this.onWin(this.wordsAdded, solveTime);
+            this.renderer.setWinningPath(this.engine.shortestPath(newState));
+            this.onWin(this.wordsAdded, this.getElapsed());
         }
 
-        return { added: word, connections, won };
+        return { added: word, connections, won: result.won };
     }
 
     // ----------------------------------------------------------
     // saveResult
     // Writes the game outcome to Firebase.
-    // Call this once per game after the win/loss is determined.
     // opponentElo should be passed for multiplayer; null for solo.
     // ----------------------------------------------------------
     async saveResult(won, opponentElo = null) {
@@ -148,7 +158,7 @@ export class GameSession {
 
     // ----------------------------------------------------------
     // getElapsed
-    // Seconds elapsed since init() was called.
+    // Seconds elapsed since _setup() was called.
     // ----------------------------------------------------------
     getElapsed() {
         if (!this._startTime) return 0;
@@ -157,13 +167,25 @@ export class GameSession {
 }
 
 // ============================================================
-// pickTwoRandom
-// Returns two distinct items chosen at random from arr.
+// pickStartPair
+// Returns two distinct words from WORD_BANK that are not
+// already too similar (avoids trivially easy starting pairs).
 // ============================================================
-function pickTwoRandom(arr) {
+function pickStartPair() {
+    const engine = getEngine();
+    for (let attempt = 0; attempt < 20; attempt++) {
+        const [w1, w2] = pickTwoDistinct(WORD_BANK);
+        if (!engine) return [w1, w2];
+        const info = engine.pairSimilarity(w1, w2);
+        if (info && !info.isTrivial) return [w1, w2];
+    }
+    return pickTwoDistinct(WORD_BANK);
+}
+
+function pickTwoDistinct(arr) {
     const i = Math.floor(Math.random() * arr.length);
     let   j = Math.floor(Math.random() * (arr.length - 1));
-    if (j >= i) j++; // ensure j !== i
+    if (j >= i) j++;
     return [arr[i], arr[j]];
 }
 
@@ -173,5 +195,5 @@ function pickTwoRandom(arr) {
 // start/end pair and write it to Firebase for both players.
 // ============================================================
 export function pickStartEnd() {
-    return pickTwoRandom(WORD_BANK);
+    return pickStartPair();
 }
