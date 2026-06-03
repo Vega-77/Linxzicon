@@ -2,44 +2,30 @@
 // multiplayer.js
 // Real-time multiplayer via Firebase Realtime Database.
 //
-// MATCHMAKING FLOW:
-//   1. Player clicks "Find Match" → findMatch() is called
-//   2. We read /queue for a waiting player
-//   3a. Someone waiting → remove them, create /games/{id}, start
-//   3b. Nobody waiting  → write ourselves to /queue, listen
-//   4. Both clients subscribe to /games/{id} with onValue
-//   5. Each word submission writes to the game doc
-//   6. The first player whose local graph becomes connected
-//      sets status="finished" and winner=theirUID in Firebase
-//   7. onGameOver fires on both clients; each saves their own result
+// BUG FIXED: _waitForGame was listening to the entire /games
+// node which fires on every update to every game forever.
+// Now we listen to /queue/{myUid} for a "gameId" field that
+// the host writes when it creates the game, which is a much
+// more targeted listener and eliminates the infinite-loop hang.
 //
-// IMPORTANT: Each client only writes its OWN result to Firebase.
-// The winner saves a win; the loser saves a loss. This avoids one
-// client writing incorrect stats for the other player.
+// FLOW:
+//   Host path:  findMatch → _createGame → _listenToGame
+//   Guest path: findMatch → write to queue → _waitForGame
+//               → host writes gameId into /queue/{guestUid}
+//               → guest reads it → _listenToGame
 // ============================================================
 
-import { database }                        from "./firebase-config.js";
+import { database } from "./firebase-config.js";
 import {
     ref, set, get, update, push,
     onValue, remove, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
-import { requireAuth }     from "./auth.js";
-import { loadAccount }     from "./account.js";
-import { pickStartEnd }    from "./game.js";
-import { saveGameResult }  from "./account.js";
+import { requireAuth }    from "./auth.js";
+import { loadAccount }    from "./account.js";
+import { pickStartEnd }   from "./game.js";
+import { saveGameResult } from "./account.js";
 
-// ============================================================
-// MultiplayerSession
-// Manages the live multiplayer state for the local player.
-// Wraps a GameSession for local graph/word logic.
-// ============================================================
 export class MultiplayerSession {
-    // renderer        — Renderer from render.js
-    // gameSession     — GameSession from game.js
-    // onMatchFound    — callback({ gameId, startWord, endWord, opponentName })
-    // onOpponentWord  — callback(word: string)
-    // onGameOver      — callback({ won: bool, opponentElo: number })
-    // onMessage       — callback(text: string) for matchmaking status text
     constructor(renderer, gameSession,
                 onMatchFound, onOpponentWord, onGameOver, onMessage) {
         this.renderer       = renderer;
@@ -49,20 +35,18 @@ export class MultiplayerSession {
         this.onGameOver     = onGameOver;
         this.onMessage      = onMessage;
 
-        this.gameId       = null;
-        this.myUid        = null;
-        this.opponentUid  = null;
-        this.opponentElo  = null;
-        this.finished     = false;
+        this.gameId      = null;
+        this.myUid       = null;
+        this.opponentUid = null;
+        this.opponentElo = null;
+        this.finished    = false;
 
-        this._unsubGame   = null; // unsubscribe fn for /games listener
-        this._unsubQueue  = null; // unsubscribe fn for /games queue-wait listener
+        this._unsubGame  = null;  // /games/{id} listener
+        this._unsubQueue = null;  // /queue/{myUid} listener (guest waiting)
     }
 
     // ----------------------------------------------------------
-    // findMatch
-    // Entry point. Checks the queue and either creates a game
-    // immediately or waits for an opponent.
+    // findMatch — entry point
     // ----------------------------------------------------------
     async findMatch() {
         const user    = await requireAuth();
@@ -71,66 +55,65 @@ export class MultiplayerSession {
 
         this.onMessage("Looking for an opponent…");
 
-        const snapshot = await get(ref(database, "queue"));
+        // Clean up any stale queue entry from a previous session
+        await remove(ref(database, `queue/${this.myUid}`));
 
-        if (snapshot.exists()) {
-            const entries = Object.entries(snapshot.val());
+        const snap = await get(ref(database, "queue"));
 
-            // Find the queued player with the closest Elo (excluding ourselves)
+        if (snap.exists()) {
+            const entries = Object.entries(snap.val());
+
             let bestKey   = null;
             let bestEntry = null;
             let bestDiff  = Infinity;
 
             for (const [key, entry] of entries) {
+                // Skip ourselves and entries that already have a gameId assigned
                 if (entry.uid === this.myUid) continue;
-                const diff = Math.abs(entry.elo - account.elo);
-                if (diff < bestDiff) {
-                    bestDiff  = diff;
-                    bestKey   = key;
-                    bestEntry = entry;
-                }
+                if (entry.gameId) continue; // already matched
+                const diff = Math.abs((entry.elo ?? 1000) - account.elo);
+                if (diff < bestDiff) { bestDiff = diff; bestKey = key; bestEntry = entry; }
             }
 
-            if (bestKey) {
-                // Found an opponent — remove them from queue and start game
+            if (bestKey && bestEntry) {
                 await remove(ref(database, `queue/${bestKey}`));
                 await this._createGame(account, bestEntry);
                 return;
             }
         }
 
-        // No opponent found — add ourselves to the queue and wait
+        // No match — write ourselves and wait
         await set(ref(database, `queue/${this.myUid}`), {
             uid:      this.myUid,
             elo:      account.elo,
             username: account.username,
-            joinedAt: serverTimestamp()
+            joinedAt: serverTimestamp(),
+            gameId:   null   // host will fill this in
         });
 
         this._waitForGame();
     }
 
     // ----------------------------------------------------------
-    // _createGame
-    // Called by the "host" player (the one who found the match).
-    // Writes the game document to /games/{autoId}.
+    // _createGame — host creates the game document, then notifies
+    // the guest by writing the gameId into their queue entry.
     // ----------------------------------------------------------
     async _createGame(myAccount, opponent) {
         const [startWord, endWord] = pickStartEnd();
-        const gameRef = push(ref(database, "games")); // auto-generate game ID
+        const gameRef = push(ref(database, "games"));
         this.gameId   = gameRef.key;
 
         await set(gameRef, {
             startWord,
             endWord,
-            status:    "active",           // "active" | "finished"
+            status:    "active",
             winner:    null,
             createdAt: serverTimestamp(),
             players: {
                 [myAccount.uid]: {
                     username: myAccount.username,
                     elo:      myAccount.elo,
-                    words:    []           // words this player has added
+                    words:    []
                 },
                 [opponent.uid]: {
                     username: opponent.username,
@@ -140,55 +123,63 @@ export class MultiplayerSession {
             }
         });
 
+        // Tell the guest which game they are in
+        await set(ref(database, `queue/${opponent.uid}`), {
+            uid:      opponent.uid,
+            elo:      opponent.elo ?? 1000,
+            username: opponent.username ?? "",
+            gameId:   this.gameId   // <-- guest watches for this
+        });
+
         this.opponentUid = opponent.uid;
-        this.opponentElo = opponent.elo;
+        this.opponentElo = opponent.elo ?? 1000;
 
         this._initLocalBoard(startWord, endWord, opponent.username);
         this._listenToGame();
     }
 
     // ----------------------------------------------------------
-    // _waitForGame
-    // Subscribes to /games and waits until a document appears
-    // that includes our UID as a player.
+    // _waitForGame — guest listens to their OWN queue entry.
+    // When the host writes a gameId into it, we start.
     // ----------------------------------------------------------
     _waitForGame() {
-        this._unsubQueue = onValue(ref(database, "games"), (snapshot) => {
-            if (!snapshot.exists()) return;
+        const myQueueRef = ref(database, `queue/${this.myUid}`);
 
-            for (const [gameId, game] of Object.entries(snapshot.val())) {
-                // Only care about active games that include us
-                if (game.status !== "active") continue;
-                if (!game.players?.[this.myUid]) continue;
+        this._unsubQueue = onValue(myQueueRef, async (snap) => {
+            if (!snap.exists()) return;
+            const data = snap.val();
+            if (!data.gameId) return; // host hasn't matched us yet
 
-                this.gameId = gameId;
+            const gameId = data.gameId;
+            this.gameId  = gameId;
 
-                // Identify the opponent
-                for (const uid of Object.keys(game.players)) {
-                    if (uid !== this.myUid) {
-                        this.opponentUid = uid;
-                        this.opponentElo = game.players[uid].elo;
-                    }
+            // Stop watching the queue
+            if (this._unsubQueue) { this._unsubQueue(); this._unsubQueue = null; }
+            await remove(myQueueRef);
+
+            // Load the game document to find the opponent
+            const gameSnap = await get(ref(database, `games/${gameId}`));
+            if (!gameSnap.exists()) return;
+            const game = gameSnap.val();
+
+            for (const uid of Object.keys(game.players ?? {})) {
+                if (uid !== this.myUid) {
+                    this.opponentUid = uid;
+                    this.opponentElo = game.players[uid].elo ?? 1000;
                 }
-
-                // Stop the queue listener — we found our game
-                if (this._unsubQueue) { this._unsubQueue(); this._unsubQueue = null; }
-
-                // Remove ourselves from the queue
-                remove(ref(database, `queue/${this.myUid}`));
-
-                const opponentName = game.players[this.opponentUid].username;
-                this._initLocalBoard(game.startWord, game.endWord, opponentName);
-                this._listenToGame();
-                return;
             }
+
+            this._initLocalBoard(
+                game.startWord,
+                game.endWord,
+                game.players[this.opponentUid]?.username ?? "Opponent"
+            );
+            this._listenToGame();
         });
     }
 
     // ----------------------------------------------------------
-    // _initLocalBoard
-    // Shared setup between host and guest.
-    // Seeds the local GameSession with the agreed start/end words.
+    // _initLocalBoard — shared setup for host and guest
     // ----------------------------------------------------------
     _initLocalBoard(startWord, endWord, opponentName) {
         this.gameSession.initWords(startWord, endWord);
@@ -196,22 +187,18 @@ export class MultiplayerSession {
     }
 
     // ----------------------------------------------------------
-    // _listenToGame
-    // Subscribes to the game document.
-    // Detects opponent word additions and game-over events.
+    // _listenToGame — watch /games/{id} for opponent words + game over
     // ----------------------------------------------------------
     _listenToGame() {
-        // Track which opponent words we have already processed
-        // so we don't re-fire onOpponentWord on every DB update
         const seenOpponentWords = new Set();
 
-        this._unsubGame = onValue(ref(database, `games/${this.gameId}`), (snapshot) => {
-            if (!snapshot.exists()) return;
-            const game         = snapshot.val();
+        this._unsubGame = onValue(ref(database, `games/${this.gameId}`), (snap) => {
+            if (!snap.exists()) return;
+            const game         = snap.val();
             const opponentData = game.players?.[this.opponentUid];
 
-            // ── Sync new opponent words ──
-            if (opponentData?.words) {
+            // New opponent words
+            if (Array.isArray(opponentData?.words)) {
                 for (const word of opponentData.words) {
                     if (!seenOpponentWords.has(word)) {
                         seenOpponentWords.add(word);
@@ -220,11 +207,10 @@ export class MultiplayerSession {
                 }
             }
 
-            // ── Game over ──
+            // Game over
             if (game.status === "finished" && !this.finished) {
                 this.finished = true;
                 if (this._unsubGame) { this._unsubGame(); this._unsubGame = null; }
-
                 const iWon = game.winner === this.myUid;
                 this.onGameOver({ won: iWon, opponentElo: this.opponentElo });
             }
@@ -232,10 +218,7 @@ export class MultiplayerSession {
     }
 
     // ----------------------------------------------------------
-    // submitWord
-    // Submits a word for the local player.
-    // Runs local game logic first, then syncs to Firebase.
-    // If this word wins the game, marks the game finished in DB.
+    // submitWord — local logic + Firebase sync
     // ----------------------------------------------------------
     async submitWord(rawInput) {
         if (this.finished) return { error: "Game is already over." };
@@ -243,27 +226,21 @@ export class MultiplayerSession {
         const result = this.gameSession.submitWord(rawInput);
         if (result.error) return result;
 
-        // Append the new word to our player entry in Firebase
-        const playerWordsRef = ref(database,
-            `games/${this.gameId}/players/${this.myUid}/words`);
-        const snap        = await get(playerWordsRef);
-        const currentList = snap.exists() ? snap.val() : [];
-        currentList.push(result.added);
-        await set(playerWordsRef, currentList);
+        // Append word to our list in Firebase
+        const wordsRef = ref(database, `games/${this.gameId}/players/${this.myUid}/words`);
+        const snap     = await get(wordsRef);
+        const list     = snap.exists() ? snap.val() : [];
+        list.push(result.added);
+        await set(wordsRef, list);
 
-        // If we just won, write the result to the game document.
-        // The onValue listener on both clients will then fire onGameOver.
         if (result.won) {
             this.finished = true;
             await update(ref(database, `games/${this.gameId}`), {
                 status: "finished",
                 winner: this.myUid
             });
-
-            // Save OUR win. The opponent saves their own loss in onGameOver.
             await saveGameResult(
-                this.myUid,
-                true,
+                this.myUid, true,
                 this.gameSession.wordsAdded,
                 this.gameSession.getElapsed(),
                 this.opponentElo
@@ -274,19 +251,13 @@ export class MultiplayerSession {
     }
 
     // ----------------------------------------------------------
-    // cancelSearch
-    // Removes us from the queue. Call if the user cancels.
+    // cancelSearch / cleanup
     // ----------------------------------------------------------
     async cancelSearch() {
         if (this._unsubQueue) { this._unsubQueue(); this._unsubQueue = null; }
         await remove(ref(database, `queue/${this.myUid}`));
     }
 
-    // ----------------------------------------------------------
-    // cleanup
-    // Unsubscribes all Firebase listeners.
-    // Call in a beforeunload handler or when leaving the page.
-    // ----------------------------------------------------------
     cleanup() {
         if (this._unsubGame)  { this._unsubGame();  this._unsubGame  = null; }
         if (this._unsubQueue) { this._unsubQueue(); this._unsubQueue = null; }
