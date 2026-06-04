@@ -11,6 +11,7 @@ import { getDatabase }   from "https://www.gstatic.com/firebasejs/10.12.0/fireba
 const firebaseConfig = {
   apiKey: "AIzaSyB801ub09JewSTwA_T0GkER4YzYvRAcg2E",
   authDomain: "linxzicon-e4d76.firebaseapp.com",
+  databaseURL: "https://linxzicon-e4d76-default-rtdb.firebaseio.com",
   projectId: "linxzicon-e4d76",
   storageBucket: "linxzicon-e4d76.firebasestorage.app",
   messagingSenderId: "937731027720",
