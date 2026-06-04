@@ -1,10 +1,7 @@
 // ============================================================
-// account.js
-// Account class and all Firebase read/write for user profiles.
-//
-// Stats are split into solo and multiplayer buckets so each
-// mode has its own games played / won / lost / averages.
-// Elo only changes in multiplayer games.
+// account.js — debug version
+// Every Firebase read/write logs what it's doing and what
+// it gets back, so we can see exactly where stats break.
 // ============================================================
 
 import { database }                    from "./firebase-config.js";
@@ -12,9 +9,6 @@ import { ref, set, get, update, push } from "https://www.gstatic.com/firebasejs/
 
 const DEFAULT_ELO = 1000;
 
-// ============================================================
-// Account
-// ============================================================
 export class Account {
     constructor(data) {
         const d = data ?? {};
@@ -23,14 +17,12 @@ export class Account {
         this.email    = d.email;
         this.elo      = d.elo ?? DEFAULT_ELO;
 
-        // ── Solo stats ──
         this.soloPlayed   = d.soloPlayed   ?? 0;
         this.soloWon      = d.soloWon      ?? 0;
         this.soloAvgWords = d.soloAvgWords ?? 0;
         this.soloAvgTime  = d.soloAvgTime  ?? 0;
-        this.soloBestTime = d.soloBestTime ?? 0; // fastest solo win in seconds
+        this.soloBestTime = d.soloBestTime ?? 0;
 
-        // ── Multiplayer stats ──
         this.multiPlayed      = d.multiPlayed      ?? 0;
         this.multiWon         = d.multiWon         ?? 0;
         this.multiLost        = d.multiLost        ?? 0;
@@ -40,22 +32,19 @@ export class Account {
         this.currentStreak    = d.currentStreak    ?? 0;
     }
 
-    get soloWinRate() {
-        if (this.soloPlayed === 0) return "0%";
-        return ((this.soloWon / this.soloPlayed) * 100).toFixed(1) + "%";
+    get soloWinRate()  {
+        if (this.soloPlayed  === 0) return "0%";
+        return ((this.soloWon  / this.soloPlayed)  * 100).toFixed(1) + "%";
     }
-
     get multiWinRate() {
         if (this.multiPlayed === 0) return "0%";
         return ((this.multiWon / this.multiPlayed) * 100).toFixed(1) + "%";
     }
 
-    // Keep backward-compat helpers used by lobby.html
+    // Backward-compat for lobby.html
     get gamesPlayed() { return this.soloPlayed + this.multiPlayed; }
     get gamesWon()    { return this.soloWon    + this.multiWon; }
     get gamesLost()   { return this.multiLost; }
-    get avgWordsUsed(){ return this.soloWon > 0 ? this.soloAvgWords : this.multiAvgWords; }
-    get avgSolveTime(){ return this.soloWon > 0 ? this.soloAvgTime  : this.multiAvgTime;  }
     get winRate()     { return this.multiWinRate; }
 
     toObject() {
@@ -81,11 +70,18 @@ export class Account {
 }
 
 // ============================================================
-// createAccount — called once on registration
+// createAccount
 // ============================================================
 export async function createAccount(uid, username, email) {
+    console.log("[account] createAccount uid:", uid, "username:", username);
     const account = new Account({ uid, username, email });
-    await set(ref(database, `users/${uid}`), account.toObject());
+    try {
+        await set(ref(database, `users/${uid}`), account.toObject());
+        console.log("[account] createAccount write OK");
+    } catch (err) {
+        console.error("[account] createAccount write FAILED:", err);
+        throw err;
+    }
     return account;
 }
 
@@ -93,18 +89,31 @@ export async function createAccount(uid, username, email) {
 // loadAccount
 // ============================================================
 export async function loadAccount(uid) {
-    const snap = await get(ref(database, `users/${uid}`));
-    if (!snap.exists()) return null;
-    return new Account(snap.val());
+    console.log("[account] loadAccount uid:", uid);
+    try {
+        const snap = await get(ref(database, `users/${uid}`));
+        console.log("[account] loadAccount exists:", snap.exists(),
+            "val:", snap.exists() ? JSON.stringify(snap.val()).slice(0, 120) : "null");
+        if (!snap.exists()) return null;
+        const account = new Account(snap.val());
+        console.log("[account] loadAccount parsed OK, username:", account.username,
+            "elo:", account.elo, "soloPlayed:", account.soloPlayed,
+            "multiPlayed:", account.multiPlayed);
+        return account;
+    } catch (err) {
+        console.error("[account] loadAccount FAILED:", err);
+        throw err;
+    }
 }
 
 // ============================================================
 // saveGameResult
-// isSolo: true for solo games, false for multiplayer
+// opponentElo === null  → solo game
+// opponentElo === number → multiplayer game
 // ============================================================
 export async function saveGameResult(uid, won, wordsUsed, solveTime, opponentElo = null) {
-    // Determine mode from whether opponentElo was provided
     const isSolo = opponentElo === null;
+    console.log(`[account] saveGameResult uid:${uid} isSolo:${isSolo} won:${won} words:${wordsUsed} time:${solveTime} oppElo:${opponentElo}`);
     return isSolo
         ? _saveSoloResult(uid, won, wordsUsed, solveTime)
         : _saveMultiResult(uid, won, wordsUsed, solveTime, opponentElo);
@@ -112,10 +121,9 @@ export async function saveGameResult(uid, won, wordsUsed, solveTime, opponentElo
 
 async function _saveSoloResult(uid, won, wordsUsed, solveTime) {
     const account = await loadAccount(uid);
-    if (!account) return;
+    if (!account) { console.error("[account] _saveSoloResult: no account found for uid", uid); return; }
 
     account.soloPlayed++;
-
     if (won) {
         account.soloWon++;
         const wins = account.soloWon;
@@ -127,30 +135,31 @@ async function _saveSoloResult(uid, won, wordsUsed, solveTime) {
             account.soloBestTime = solveTime;
     }
 
-    await update(ref(database, `users/${uid}`), account.toObject());
-    await push(ref(database, `users/${uid}/history`), {
-        date:      new Date().toISOString(),
-        mode:      "solo",
-        won,
-        wordsUsed,
-        solveTime,
-        eloAtTime: account.elo
-    });
-
+    console.log("[account] _saveSoloResult writing:", JSON.stringify(account.toObject()).slice(0, 120));
+    try {
+        await update(ref(database, `users/${uid}`), account.toObject());
+        console.log("[account] _saveSoloResult profile update OK");
+        const histRef = ref(database, `users/${uid}/history`);
+        await push(histRef, {
+            date: new Date().toISOString(), mode: "solo",
+            won, wordsUsed, solveTime, eloAtTime: account.elo
+        });
+        console.log("[account] _saveSoloResult history push OK");
+    } catch (err) {
+        console.error("[account] _saveSoloResult write FAILED:", err);
+    }
     return account;
 }
 
 async function _saveMultiResult(uid, won, wordsUsed, solveTime, opponentElo) {
     const account = await loadAccount(uid);
-    if (!account) return;
+    if (!account) { console.error("[account] _saveMultiResult: no account for uid", uid); return; }
 
     account.multiPlayed++;
-
     if (won) {
         account.multiWon++;
         account.currentStreak++;
-        if (account.currentStreak > account.winStreak)
-            account.winStreak = account.currentStreak;
+        if (account.currentStreak > account.winStreak) account.winStreak = account.currentStreak;
         const wins = account.multiWon;
         if (wordsUsed > 0)
             account.multiAvgWords = ((account.multiAvgWords * (wins - 1)) + wordsUsed) / wins;
@@ -163,21 +172,23 @@ async function _saveMultiResult(uid, won, wordsUsed, solveTime, opponentElo) {
 
     account.elo = _calcElo(account.elo, opponentElo, won);
 
-    await update(ref(database, `users/${uid}`), account.toObject());
-    await push(ref(database, `users/${uid}/history`), {
-        date:      new Date().toISOString(),
-        mode:      "multiplayer",
-        won,
-        wordsUsed,
-        solveTime,
-        eloAtTime: account.elo
-    });
-
+    console.log("[account] _saveMultiResult writing:", JSON.stringify(account.toObject()).slice(0, 120));
+    try {
+        await update(ref(database, `users/${uid}`), account.toObject());
+        console.log("[account] _saveMultiResult profile update OK");
+        await push(ref(database, `users/${uid}/history`), {
+            date: new Date().toISOString(), mode: "multiplayer",
+            won, wordsUsed, solveTime, eloAtTime: account.elo
+        });
+        console.log("[account] _saveMultiResult history push OK");
+    } catch (err) {
+        console.error("[account] _saveMultiResult write FAILED:", err);
+    }
     return account;
 }
 
 function _calcElo(playerElo, opponentElo, won) {
-    const K        = 32;
+    const K = 32;
     const expected = 1 / (1 + Math.pow(10, (opponentElo - playerElo) / 400));
     return Math.round(playerElo + K * ((won ? 1 : 0) - expected));
 }
