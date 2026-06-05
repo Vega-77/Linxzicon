@@ -527,7 +527,7 @@
         const oppCanvas   = document.getElementById("opp-canvas");
         const oppGraph    = new Graph();
         const oppRenderer = new Renderer(oppCanvas, oppGraph);
-        oppRenderer.hideLabels = true;
+        oppRenderer.hideLabels = false;
 
         let oppBoardState = null;
         const oppWordMap  = new Map(); // actual word → node key in oppGraph
