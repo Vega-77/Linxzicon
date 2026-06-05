@@ -358,6 +358,7 @@
     import { Renderer }             from "./js/render.js";
     import { GameSession }          from "./js/game.js";
     import { MultiplayerSession }   from "./js/multiplayer.js";
+    import { calcEloDelta }         from "./js/account.js";
 
     // ── Mode from URL ──
     const params = new URLSearchParams(window.location.search);
@@ -508,6 +509,11 @@
 
         activeSubmit = (w) => gameSession.submitWord(w);
 
+        window.addEventListener("beforeunload", () => {
+            renderer.stop();
+            stopTimer();
+        });
+
         const { startWord, endWord } = gameSession.init();
         document.getElementById("start-word-tag").textContent = startWord;
         document.getElementById("end-word-tag").textContent   = endWord;
@@ -630,9 +636,7 @@
 
             // onGameOver
             async ({ won, opponentElo, myElo }) => {
-                const K        = 32;
-                const expected = 1 / (1 + Math.pow(10, (opponentElo - myElo) / 400));
-                const eloChange = Math.round(K * ((won ? 1 : 0) - expected));
+                const eloChange = calcEloDelta(myElo, opponentElo, won);
 
                 if (!won && oppBoardState) {
                     const engine = getEngine();
@@ -682,7 +686,12 @@
         document.getElementById("go-lobby-btn-multi")
             .addEventListener("click", () => { window.location.href = "lobby.html"; });
 
-        window.addEventListener("beforeunload", () => multiSession.cleanup());
+        window.addEventListener("beforeunload", () => {
+            multiSession.cleanup();
+            myRenderer.stop();
+            oppRenderer.stop();
+            stopTimer();
+        });
     }
 
     // ── Navigation ──
