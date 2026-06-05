@@ -4,7 +4,7 @@
 // it gets back, so we can see exactly where stats break.
 // ============================================================
 
-import { database }                    from "./firebase-config.js";
+import { database, auth }              from "./firebase-config.js";
 import { ref, set, get, update, push } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
 
 const DEFAULT_ELO = 1000;
@@ -94,7 +94,24 @@ export async function loadAccount(uid) {
         const snap = await get(ref(database, `users/${uid}`));
         console.log("[account] loadAccount exists:", snap.exists(),
             "val:", snap.exists() ? JSON.stringify(snap.val()).slice(0, 120) : "null");
-        if (!snap.exists()) return null;
+
+        if (!snap.exists()) {
+            // Profile missing — registration was interrupted before the DB write completed.
+            // Recreate a minimal profile from the current Auth user.
+            const user = auth.currentUser;
+            if (user) {
+                console.warn("[account] loadAccount: no profile found, creating default");
+                const account = new Account({
+                    uid,
+                    username: user.displayName ?? user.email.split("@")[0],
+                    email:    user.email,
+                });
+                await set(ref(database, `users/${uid}`), account.toObject());
+                return account;
+            }
+            return null;
+        }
+
         const account = new Account(snap.val());
         console.log("[account] loadAccount parsed OK, username:", account.username,
             "elo:", account.elo, "soloPlayed:", account.soloPlayed,
