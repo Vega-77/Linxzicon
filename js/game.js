@@ -22,6 +22,7 @@ import { requireAuth }    from "./auth.js";
 // similar enough to connect directly) are skipped.
 // ============================================================
 const WORD_BANK = [
+    // original staples
     "ocean", "forest", "music", "castle", "diamond",
     "dragon", "thunder", "garden", "mirror", "shadow",
     "silver", "golden", "winter", "summer", "river",
@@ -29,7 +30,64 @@ const WORD_BANK = [
     "crystal", "cloud", "ancient", "sword", "kingdom",
     "tiger", "eagle", "wolf", "whale", "falcon",
     "piano", "violin", "guitar", "canvas", "marble",
-    "captain", "voyage", "jungle", "prairie", "glacier"
+    "captain", "voyage", "jungle", "prairie", "glacier",
+    // water & coastline
+    "lake", "stream", "waterfall", "harbor", "lagoon",
+    "reef", "tide", "delta", "torrent", "cascade",
+    // terrain
+    "valley", "canyon", "volcano", "cave", "plateau",
+    "cliff", "tundra", "ravine", "dune", "crevasse",
+    // sky & weather
+    "frost", "snow", "mist", "lightning", "rainbow",
+    "tornado", "blizzard", "tempest", "gale", "vortex",
+    // flora
+    "thorn", "vine", "fern", "moss", "petal",
+    "willow", "maple", "cedar", "thistle", "clover",
+    // large animals
+    "jaguar", "elephant", "buffalo", "gorilla", "giraffe",
+    "rhino", "bison", "panther", "cheetah", "moose",
+    // birds
+    "raven", "crane", "sparrow", "hawk", "heron",
+    "dove", "parrot", "pelican", "swift", "osprey",
+    // aquatic & reptile
+    "dolphin", "salmon", "cobra", "lizard", "turtle",
+    "octopus", "lobster", "walrus", "otter", "crab",
+    // small mammals
+    "badger", "beaver", "hedgehog", "squirrel", "lynx",
+    "chipmunk", "lemur", "mongoose", "weasel", "ferret",
+    // celestial
+    "moon", "star", "comet", "nebula", "dawn",
+    "dusk", "twilight", "eclipse", "cosmos", "aurora",
+    // materials
+    "iron", "copper", "quartz", "amber", "ivory",
+    "granite", "obsidian", "sapphire", "emerald", "onyx",
+    // music
+    "drum", "trumpet", "melody", "rhythm", "chorus",
+    "verse", "anthem", "ballad", "sonnet", "lyric",
+    // arts & literature
+    "mosaic", "portrait", "sculpture", "sketch", "palette",
+    "mural", "prose", "fable", "legend", "chronicle",
+    // medieval & exploration
+    "shield", "tower", "throne", "crown", "armor",
+    "lance", "dungeon", "citadel", "fortress", "rampart",
+    // mythology & mystery
+    "ghost", "spirit", "myth", "amulet", "oracle",
+    "rune", "phantom", "serpent", "specter", "wraith",
+    // abstract & emotion
+    "sorrow", "glory", "courage", "wisdom", "silence",
+    "memory", "dream", "chaos", "grace", "honor",
+    // navigation & exploration
+    "compass", "anchor", "lighthouse", "horizon", "exile",
+    "vessel", "atlas", "current", "chart", "beacon",
+    // structures & places
+    "lantern", "clock", "bridge", "library", "market",
+    "forge", "cabin", "cellar", "chapel", "vault",
+    // nature forces
+    "ember", "smoke", "surge", "erosion", "gravity",
+    "magnet", "fossil", "prism", "vapor", "carbon",
+    // food & plants
+    "honey", "walnut", "chestnut", "pepper", "ginger",
+    "lavender", "vanilla", "cinnamon", "saffron", "sage",
 ];
 
 // ============================================================
