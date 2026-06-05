@@ -281,7 +281,6 @@ export class MultiplayerSession {
             for (const word of words) {
                 if (!seenOpponentWords.has(word)) {
                     seenOpponentWords.add(word);
-                    console.log("[multi] opponent word:", word);
                     this.onOpponentWord(word);
                 }
             }
@@ -322,9 +321,6 @@ export class MultiplayerSession {
 
         const result = this.gameSession.submitWord(rawInput);
         if (result.error) return result;
-
-        console.log("[multi] submitWord:", result.added,
-            "connections:", result.connections);
 
         {
             const wordsRef = ref(database,
@@ -378,7 +374,6 @@ export class MultiplayerSession {
     // ----------------------------------------------------------
     async requestRematch() {
         if (!this.gameId) return;
-        console.log("[multi] requestRematch");
         try {
             await set(ref(database, `games/${this.gameId}/rematch/${this.myUid}`), true);
         } catch (err) {
@@ -419,7 +414,6 @@ export class MultiplayerSession {
             const [sw, ew] = pickStartEnd();
             const gameRef  = push(ref(database, "games"));
             this.gameId    = gameRef.key;
-            console.log("[multi] rematch host creating game:", this.gameId);
 
             try {
                 await set(gameRef, {
@@ -443,7 +437,6 @@ export class MultiplayerSession {
                 });
                 // Write new game ID to old game doc so guest can find it
                 await update(ref(database, `games/${oldGameId}`), { rematchGameId: this.gameId });
-                console.log("[multi] rematch game created, notified guest");
             } catch (err) {
                 console.error("[multi] rematch game creation FAILED:", err);
                 return;
@@ -454,13 +447,11 @@ export class MultiplayerSession {
 
         } else {
             // Guest: watch old game doc for rematchGameId written by host
-            console.log("[multi] rematch guest waiting for new gameId");
             this._unsubRematch = onValue(ref(database, `games/${oldGameId}/rematchGameId`), async (snap) => {
                 if (!snap.exists()) return;
                 if (this._unsubRematch) { this._unsubRematch(); this._unsubRematch = null; }
 
                 this.gameId = snap.val();
-                console.log("[multi] rematch guest got new gameId:", this.gameId);
 
                 try {
                     const gs = await get(ref(database, `games/${this.gameId}`));
@@ -482,7 +473,6 @@ export class MultiplayerSession {
     // cancelSearch / cleanup
     // ----------------------------------------------------------
     async cancelSearch() {
-        console.log("[multi] cancelSearch");
         if (this._unsubQueue) { this._unsubQueue(); this._unsubQueue = null; }
         try { await remove(ref(database, `queue/${this.myUid}`)); } catch (_) {}
     }
