@@ -184,6 +184,26 @@
         }
         .word-input-row .btn { padding: 12px 24px; font-size: 1rem; }
 
+        /* ── Results bar (multiplayer end state) ── */
+        #results-bar {
+            background: var(--bg2);
+            border: 1px solid var(--bg3);
+            border-radius: var(--radius);
+            padding: 16px 24px;
+            display: none;
+            align-items: center;
+            gap: 20px;
+            flex-shrink: 0;
+            flex-wrap: wrap;
+        }
+        #results-bar.visible { display: flex; }
+        #results-verdict { font-size: 1.4rem; font-weight: 800; }
+        #results-verdict.victory { color: var(--green); }
+        #results-verdict.defeat  { color: var(--red); }
+        #results-elo { font-size: 1.1rem; font-weight: 700; }
+        .elo-gain { color: var(--green); }
+        .elo-loss { color: var(--red); }
+
         /* ── Status message ── */
         #status-msg {
             font-size: 0.875rem;
@@ -296,8 +316,19 @@
             </div>
         </div>
 
+        <!-- Results bar (multiplayer end state) -->
+        <div id="results-bar">
+            <div id="results-verdict"></div>
+            <div id="results-elo"></div>
+            <div id="results-stats"></div>
+            <div class="win-btn-row">
+                <button class="btn btn-primary" id="rematch-btn">Rematch</button>
+                <button class="btn btn-ghost"   id="go-lobby-btn-multi">Lobby</button>
+            </div>
+        </div>
+
         <!-- Word input -->
-        <div class="word-input-row">
+        <div class="word-input-row" id="word-input-row">
             <input type="text" id="word-input"
                    placeholder="Type a connecting word and press Enter…"
                    autocomplete="off" autocorrect="off" spellcheck="false" />
@@ -509,6 +540,27 @@
             (msg) => setStatus(msg, "info")
         );
 
+        let rematchClicked = false;
+
+        function showMultiResults(won, eloChange, wordsUsed, solveTime) {
+            stopTimer();
+            document.getElementById("word-input-row").style.display = "none";
+            const bar = document.getElementById("results-bar");
+            bar.classList.add("visible");
+
+            const verdict = document.getElementById("results-verdict");
+            verdict.textContent = won ? "Victory" : "Defeat";
+            verdict.className   = won ? "victory"  : "defeat";
+
+            const eloEl  = document.getElementById("results-elo");
+            const sign   = eloChange >= 0 ? "+" : "";
+            const cls    = eloChange >= 0 ? "elo-gain" : "elo-loss";
+            eloEl.innerHTML = `<span class="${cls}">${sign}${eloChange} ELO</span>`;
+
+            document.getElementById("results-stats").textContent =
+                `${wordsUsed} word${wordsUsed !== 1 ? "s" : ""} · ${fmtTime(solveTime)}`;
+        }
+
         const multiSession = new MultiplayerSession(
             myRenderer,
             gameSession,
@@ -518,6 +570,14 @@
                 const sw = startWord.toLowerCase();
                 const ew = endWord.toLowerCase();
 
+                // Reset results bar from any previous round
+                document.getElementById("results-bar").classList.remove("visible");
+                document.getElementById("word-input-row").style.display = "";
+                rematchClicked = false;
+                const rBtn = document.getElementById("rematch-btn");
+                rBtn.textContent = "Rematch";
+                rBtn.disabled    = false;
+
                 // Initialise opponent board state and graph
                 const engine = getEngine();
                 oppBoardState = engine.createGame(sw, ew);
@@ -525,9 +585,11 @@
                 oppWordMap.set(sw, sw);
                 oppWordMap.set(ew, ew);
                 oppWordCount = 0;
+                oppGraph.nodes.clear();
                 oppGraph.addNode(sw, []);
                 oppGraph.addNode(ew, []);
                 oppRenderer.setStartEnd(sw, ew);
+                oppRenderer.setWinningPath(null);
                 oppRenderer.start();
 
                 // Update UI
@@ -567,31 +629,34 @@
             },
 
             // onGameOver
-            async ({ won, opponentElo }) => {
-                if (won) {
-                    showOverlay(
-                        "You connected them! 🎉",
-                        `${gameSession.wordsAdded} word${gameSession.wordsAdded !== 1 ? "s" : ""} · ${fmtTime(gameSession.getElapsed())}`
-                    );
-                    // Result already saved in multiSession.submitWord
-                } else {
-                    // Highlight the opponent's winning path on their board
-                    if (oppBoardState) {
-                        const engine = getEngine();
-                        const path = engine.shortestPath(oppBoardState);
-                        if (path) {
-                            const displayPath = path.map(w => oppWordMap.get(w) ?? w);
-                            oppRenderer.setWinningPath(displayPath);
-                        }
+            async ({ won, opponentElo, myElo }) => {
+                const K        = 32;
+                const expected = 1 / (1 + Math.pow(10, (opponentElo - myElo) / 400));
+                const eloChange = Math.round(K * ((won ? 1 : 0) - expected));
+
+                if (!won && oppBoardState) {
+                    const engine = getEngine();
+                    const path   = engine.shortestPath(oppBoardState);
+                    if (path) {
+                        const displayPath = path.map(w => oppWordMap.get(w) ?? w);
+                        oppRenderer.setWinningPath(displayPath);
                     }
-                    showOverlay("Opponent won 😔", "Better luck next time!");
                     await gameSession.saveResult(false, opponentElo);
                 }
+
+                showMultiResults(won, eloChange, gameSession.wordsAdded, gameSession.getElapsed());
             },
 
             // onMessage (matchmaking status)
             (msg) => {
                 document.getElementById("matchmaking-msg").textContent = msg;
+            },
+
+            // onRematchRequested — opponent clicked Rematch first
+            () => {
+                const btn = document.getElementById("rematch-btn");
+                btn.textContent = "Accept Rematch";
+                btn.disabled    = false;
             }
         );
 
@@ -603,6 +668,19 @@
                 await multiSession.cancelSearch();
                 window.location.href = "lobby.html";
             });
+
+        document.getElementById("rematch-btn")
+            .addEventListener("click", async () => {
+                if (rematchClicked) return;
+                rematchClicked = true;
+                const btn = document.getElementById("rematch-btn");
+                btn.textContent = "Waiting…";
+                btn.disabled    = true;
+                await multiSession.requestRematch();
+            });
+
+        document.getElementById("go-lobby-btn-multi")
+            .addEventListener("click", () => { window.location.href = "lobby.html"; });
 
         window.addEventListener("beforeunload", () => multiSession.cleanup());
     }
