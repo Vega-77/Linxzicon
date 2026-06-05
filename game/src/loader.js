@@ -1,7 +1,7 @@
 const IS_NODE = typeof globalThis.window === 'undefined';
 
 // Bump this string whenever embeddings.bin is rebuilt so the old cache is ignored.
-const EMBEDDINGS_CACHE = 'linxicon-embeddings-v2';
+const EMBEDDINGS_CACHE = 'linxicon-embeddings-v3';
 
 async function readBuffer(source) {
   if (IS_NODE) {
