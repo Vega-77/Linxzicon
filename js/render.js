@@ -2,11 +2,11 @@
 // render.js — with debug logging to diagnose invisible nodes
 // ============================================================
 
-const REPULSION = 12000;
+const REPULSION = 50000;
 const SPRING    = 0.06;
-const REST_LEN  = 180;
-const DAMPING   = 0.82;
-const GRAVITY   = 0.012;
+const REST_LEN  = 200;
+const DAMPING   = 0.85;
+const GRAVITY   = 0.008;
 const TIME_STEP = 0.5;
 
 const NODE_RADIUS  = 30;
