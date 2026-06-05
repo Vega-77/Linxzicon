@@ -30,6 +30,7 @@ export class Renderer {
         this.startWord   = null;
         this.endWord     = null;
         this.winningPath = null;
+        this.hideLabels  = false;
         this._running    = false;
         this._animFrame  = null;
         this._dragging   = null;
@@ -216,11 +217,15 @@ export class Renderer {
                 ctx.stroke();
             }
 
+            const label = (this.hideLabels &&
+                           node.word !== this.startWord &&
+                           node.word !== this.endWord)
+                ? "?" : node.word;
             ctx.fillStyle    = COL_TEXT;
-            ctx.font         = `bold ${node.word.length > 8 ? 10 : 12}px sans-serif`;
+            ctx.font         = `bold ${label.length > 8 ? 10 : 12}px sans-serif`;
             ctx.textAlign    = "center";
             ctx.textBaseline = "middle";
-            ctx.fillText(node.word, node.x, node.y);
+            ctx.fillText(label, node.x, node.y);
 
             if (isTarget) {
                 ctx.fillStyle  = "rgba(245,158,11,0.8)";
