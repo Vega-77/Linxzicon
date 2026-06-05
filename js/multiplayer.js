@@ -1,7 +1,7 @@
 import { database } from "./firebase-config.js";
 import {
     ref, set, get, update, push,
-    onValue, remove, serverTimestamp
+    onValue, remove, serverTimestamp, runTransaction
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
 import { requireAuth }    from "./auth.js";
 import { loadAccount }    from "./account.js";
@@ -33,8 +33,9 @@ export class MultiplayerSession {
         this._rematchStarted  = false;
         this._rematchNotified = false;
 
-        this._unsubGame  = null;
-        this._unsubQueue = null;
+        this._unsubGame    = null;
+        this._unsubQueue   = null;
+        this._unsubRematch = null;
     }
 
     // ----------------------------------------------------------
@@ -48,8 +49,6 @@ export class MultiplayerSession {
             user       = await requireAuth();
             this.myUid = user.uid;
             account    = await loadAccount(user.uid);
-            console.log("[multi] auth OK uid:", this.myUid, "elo:", account?.elo,
-                "username:", account?.username);
         } catch (err) {
             console.error("[multi] auth/loadAccount failed:", err);
             this.onMessage("Authentication error — see console.");
@@ -65,15 +64,12 @@ export class MultiplayerSession {
         // ── Always remove our own stale entry first ──
         try {
             await remove(ref(database, `queue/${this.myUid}`));
-            console.log("[multi] cleared own stale queue entry");
         } catch (_) {}
 
         // ── Read the queue and clean up stale entries ──
         let snap;
         try {
             snap = await get(ref(database, "queue"));
-            console.log("[multi] queue exists:", snap.exists(),
-                snap.exists() ? JSON.stringify(snap.val()).slice(0, 300) : "empty");
         } catch (err) {
             console.error("[multi] reading queue FAILED:", err);
             this.onMessage("Firebase read error — check DB rules.");
@@ -87,14 +83,10 @@ export class MultiplayerSession {
                 if (entry.uid === this.myUid) continue;
 
                 if (entry.gameId) {
-                    console.log("[multi] entry", entry.uid, "has stale gameId", entry.gameId,
-                        "— checking if game is still active");
                     try {
                         const gameSnap = await get(
                             ref(database, `games/${entry.gameId}/status`));
                         if (!gameSnap.exists() || gameSnap.val() !== "active") {
-                            console.log("[multi] stale game found, removing queue entry for",
-                                entry.uid);
                             await remove(ref(database, `queue/${key}`));
                             continue;
                         }
@@ -102,7 +94,6 @@ export class MultiplayerSession {
                         await remove(ref(database, `queue/${key}`)).catch(() => {});
                         continue;
                     }
-                    console.log("[multi] entry", entry.uid, "is actively in a game, skipping");
                     continue;
                 }
 
@@ -116,15 +107,25 @@ export class MultiplayerSession {
         }
 
         if (bestKey) {
-            console.log("[multi] found opponent:", bestEntry.uid,
-                "username:", bestEntry.username, "elo:", bestEntry.elo);
-            try { await remove(ref(database, `queue/${bestKey}`)); } catch (_) {}
-            await this._createGame(account, bestEntry);
-            return;
+            // Atomically claim the opponent's queue slot to prevent two hosts racing for the same player
+            let committed = false;
+            try {
+                const result = await runTransaction(ref(database, `queue/${bestKey}`), (current) => {
+                    if (!current || current.gameId) return; // already taken — abort
+                    return null; // claim by deleting
+                });
+                committed = result.committed;
+            } catch (_) {}
+
+            if (committed) {
+                await this._createGame(account, bestEntry);
+                return;
+            }
+            // Slot was taken by another host — fall through to queue
+            console.log("[multi] opponent slot already claimed, entering queue");
         }
 
         // No opponent — write self and wait
-        console.log("[multi] no opponent found, writing self to queue");
         try {
             await set(ref(database, `queue/${this.myUid}`), {
                 uid:      this.myUid,
@@ -133,7 +134,6 @@ export class MultiplayerSession {
                 joinedAt: serverTimestamp(),
                 gameId:   null
             });
-            console.log("[multi] wrote self to queue");
         } catch (err) {
             console.error("[multi] writing to queue FAILED:", err);
             this.onMessage("Firebase write error — check DB rules.");
@@ -148,16 +148,12 @@ export class MultiplayerSession {
     // _createGame — host
     // ----------------------------------------------------------
     async _createGame(myAccount, opponent) {
-        console.log("[multi] _createGame host:", myAccount.uid,
-            "username:", myAccount.username,
-            "guest:", opponent.uid, "username:", opponent.username);
+        console.log("[multi] _createGame host:", myAccount.uid);
 
         const [startWord, endWord] = pickStartEnd();
-        console.log("[multi] word pair:", startWord, "→", endWord);
 
         const gameRef = push(ref(database, "games"));
         this.gameId   = gameRef.key;
-        console.log("[multi] gameId:", this.gameId);
 
         const opponentUsername = opponent.username ?? "Opponent";
 
@@ -185,7 +181,6 @@ export class MultiplayerSession {
                     }
                 }
             });
-            console.log("[multi] game doc written OK");
         } catch (err) {
             console.error("[multi] writing game doc FAILED:", err);
             this.onMessage("Firebase write error — check DB rules.");
@@ -200,7 +195,6 @@ export class MultiplayerSession {
                 username: opponentUsername,
                 gameId:   this.gameId
             });
-            console.log("[multi] notified guest with gameId");
         } catch (err) {
             console.error("[multi] notifying guest FAILED:", err);
         }
@@ -213,20 +207,15 @@ export class MultiplayerSession {
     // _waitForGame — guest watches their own queue slot
     // ----------------------------------------------------------
     _waitForGame() {
-        console.log("[multi] _waitForGame listening to /queue/" + this.myUid);
         const myQueueRef = ref(database, `queue/${this.myUid}`);
 
         this._unsubQueue = onValue(myQueueRef, async (snap) => {
-            console.log("[multi] queue slot update exists:", snap.exists(),
-                snap.exists() ? JSON.stringify(snap.val()) : "null");
-
             if (!snap.exists()) return;
             const data = snap.val();
-            if (!data.gameId) { console.log("[multi] no gameId yet, waiting…"); return; }
+            if (!data.gameId) return;
 
             const gameId = data.gameId;
             this.gameId  = gameId;
-            console.log("[multi] got gameId:", gameId);
 
             if (this._unsubQueue) { this._unsubQueue(); this._unsubQueue = null; }
             try { await remove(myQueueRef); } catch (_) {}
@@ -235,10 +224,6 @@ export class MultiplayerSession {
             let gameSnap;
             try {
                 gameSnap = await get(ref(database, `games/${gameId}`));
-                console.log("[multi] game doc exists:", gameSnap.exists(),
-                    gameSnap.exists()
-                        ? JSON.stringify(gameSnap.val()).slice(0, 300)
-                        : "null");
             } catch (err) {
                 console.error("[multi] loading game doc FAILED:", err);
                 return;
@@ -256,9 +241,6 @@ export class MultiplayerSession {
                     this.opponentUid      = uid;
                     this.opponentElo      = game.players[uid].elo ?? 1000;
                     this.opponentUsername = game.players[uid].username ?? "Opponent";
-                    console.log("[multi] opponent:", uid,
-                        "username:", this.opponentUsername,
-                        "elo:", this.opponentElo);
                 }
             }
 
@@ -276,7 +258,6 @@ export class MultiplayerSession {
     // _initLocalBoard
     // ----------------------------------------------------------
     _initLocalBoard(startWord, endWord, opponentName) {
-        console.log("[multi] _initLocalBoard:", startWord, "→", endWord, "vs", opponentName);
         this.gameSession.initWords(startWord, endWord);
         this.onMatchFound({ gameId: this.gameId, startWord, endWord, opponentName });
     }
@@ -285,7 +266,6 @@ export class MultiplayerSession {
     // _listenToGame
     // ----------------------------------------------------------
     _listenToGame() {
-        console.log("[multi] _listenToGame gameId:", this.gameId);
         const seenOpponentWords = new Set();
 
         this._unsubGame = onValue(ref(database, `games/${this.gameId}`), (snap) => {
@@ -346,27 +326,41 @@ export class MultiplayerSession {
         console.log("[multi] submitWord:", result.added,
             "connections:", result.connections);
 
-        try {
+        {
             const wordsRef = ref(database,
                 `games/${this.gameId}/players/${this.myUid}/words`);
-            await push(wordsRef, result.added);
-            console.log("[multi] word pushed to Firebase");
-        } catch (err) {
-            console.error("[multi] word push FAILED:", err);
+            let pushed = false;
+            for (let i = 0; i < 3; i++) {
+                try {
+                    await push(wordsRef, result.added);
+                    pushed = true;
+                    break;
+                } catch {
+                    if (i < 2) await new Promise(r => setTimeout(r, 400 * (i + 1)));
+                }
+            }
+            if (!pushed) console.error("[multi] word push failed after 3 attempts — opponent won't see this word");
         }
 
         if (result.won) {
             this.finished = true;
             // Show the winner's overlay immediately without waiting for Firebase round-trip
             this.onGameOver({ won: true, opponentElo: this.opponentElo, myElo: this.myElo });
-            try {
-                await update(ref(database, `games/${this.gameId}`), {
-                    status: "finished",
-                    winner: this.myUid
-                });
-                console.log("[multi] marked game finished");
-            } catch (err) {
-                console.error("[multi] marking finished FAILED:", err);
+            {
+                let done = false;
+                for (let i = 0; i < 3; i++) {
+                    try {
+                        await update(ref(database, `games/${this.gameId}`), {
+                            status: "finished",
+                            winner: this.myUid
+                        });
+                        done = true;
+                        break;
+                    } catch {
+                        if (i < 2) await new Promise(r => setTimeout(r, 500 * (i + 1)));
+                    }
+                }
+                if (!done) console.error("[multi] failed to mark game finished — opponent may not see game over");
             }
             await saveGameResult(
                 this.myUid, true,
@@ -399,8 +393,19 @@ export class MultiplayerSession {
         const oldGameId = this.gameId;
         console.log("[multi] _startRematch from game:", oldGameId);
 
+        // Refresh both ELOs so rematch rating calculations use current values
+        try {
+            const [mySnap, oppSnap] = await Promise.all([
+                get(ref(database, `users/${this.myUid}/elo`)),
+                get(ref(database, `users/${this.opponentUid}/elo`))
+            ]);
+            if (mySnap.exists())  this.myElo      = mySnap.val();
+            if (oppSnap.exists()) this.opponentElo = oppSnap.val();
+        } catch (_) {}
+
         // Unsubscribe from old game listener first
-        if (this._unsubGame) { this._unsubGame(); this._unsubGame = null; }
+        if (this._unsubGame)    { this._unsubGame();    this._unsubGame    = null; }
+        if (this._unsubRematch) { this._unsubRematch(); this._unsubRematch = null; }
 
         // Reset state for the new game
         this._gameOverFired   = false;
@@ -450,9 +455,9 @@ export class MultiplayerSession {
         } else {
             // Guest: watch old game doc for rematchGameId written by host
             console.log("[multi] rematch guest waiting for new gameId");
-            const unsub = onValue(ref(database, `games/${oldGameId}/rematchGameId`), async (snap) => {
+            this._unsubRematch = onValue(ref(database, `games/${oldGameId}/rematchGameId`), async (snap) => {
                 if (!snap.exists()) return;
-                unsub();
+                if (this._unsubRematch) { this._unsubRematch(); this._unsubRematch = null; }
 
                 this.gameId = snap.val();
                 console.log("[multi] rematch guest got new gameId:", this.gameId);
@@ -483,8 +488,8 @@ export class MultiplayerSession {
     }
 
     cleanup() {
-        console.log("[multi] cleanup");
-        if (this._unsubGame)  { this._unsubGame();  this._unsubGame  = null; }
-        if (this._unsubQueue) { this._unsubQueue(); this._unsubQueue = null; }
+        if (this._unsubGame)    { this._unsubGame();    this._unsubGame    = null; }
+        if (this._unsubQueue)   { this._unsubQueue();   this._unsubQueue   = null; }
+        if (this._unsubRematch) { this._unsubRematch(); this._unsubRematch = null; }
     }
 }
