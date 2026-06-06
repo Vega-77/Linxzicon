@@ -1,0 +1,606 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Linxicon — Daily</title>
+    <link rel="stylesheet" href="css/style.css" />
+    <style>
+        html, body { height: 100%; overflow: hidden; }
+        body { display: flex; flex-direction: column; }
+
+        /* ── Screens ── */
+        .screen { display: none; flex: 1; min-height: 0; }
+        .screen.active { display: flex; }
+
+        /* ── Loading ── */
+        #loading-screen { align-items: center; justify-content: center; }
+        .load-card {
+            background: var(--bg2); border: 1px solid var(--bg3);
+            border-radius: 16px; padding: 48px 40px;
+            text-align: center; max-width: 360px; width: 100%;
+            animation: scalePop 0.28s ease;
+        }
+        .load-card h2 { margin-bottom: 8px; }
+        .load-card p  { color: var(--text-muted); }
+
+        /* ── Game ── */
+        #game-screen { flex-direction: column; }
+        .game-wrap {
+            display: flex; flex-direction: column; flex: 1;
+            padding: 10px 14px; gap: 8px; min-height: 0;
+        }
+        .game-info-bar {
+            display: flex; align-items: center; justify-content: space-between;
+            background: var(--bg2); border: 1px solid var(--bg3);
+            border-radius: var(--radius); padding: 10px 20px;
+            flex-shrink: 0; flex-wrap: wrap; gap: 8px;
+        }
+        .target-words { display: flex; align-items: center; gap: 12px; font-size: 1.05rem; font-weight: 700; }
+        .word-tag { padding: 6px 16px; border-radius: 8px; background: var(--bg3); letter-spacing: 0.03em; }
+        .word-tag.start, .word-tag.end { color: var(--gold); border: 1px solid rgba(245,158,11,0.5); background: rgba(245,158,11,0.08); }
+        .arrow { color: var(--text-muted); font-size: 1.1rem; }
+        .info-right { display: flex; gap: 20px; align-items: center; }
+        .word-count-pill { background: var(--bg3); border-radius: 20px; padding: 4px 14px; font-size: 0.85rem; color: var(--text-muted); }
+        .word-count-pill strong { color: var(--text); }
+        .timer { font-size: 1.5rem; font-weight: 700; color: var(--gold); letter-spacing: 2px; min-width: 60px; text-align: right; }
+
+        #archive-banner {
+            background: linear-gradient(90deg, rgba(245,158,11,0.12), transparent);
+            border: 1px solid rgba(245,158,11,0.3); border-radius: var(--radius);
+            padding: 8px 20px; font-size: 0.9rem; color: var(--gold);
+            font-weight: 600; flex-shrink: 0;
+        }
+
+        #solo-board {
+            position: relative; flex: 1; min-height: 0;
+            border-radius: var(--radius); overflow: hidden; border: 1px solid var(--bg3);
+        }
+        #solo-board canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: block; }
+
+        .word-input-row { display: flex; gap: 10px; flex-shrink: 0; }
+        .word-input-row input { flex: 1; font-size: 1rem; padding: 12px 16px; }
+        .word-input-row .btn  { padding: 12px 24px; font-size: 1rem; }
+
+        #status-msg {
+            font-size: 0.875rem; min-height: 18px; text-align: center;
+            color: var(--text-muted); flex-shrink: 0;
+        }
+        #status-msg.error   { color: var(--red); }
+        #status-msg.success { color: var(--green); }
+        #status-msg.info    { color: #a5b4fc; }
+
+        /* ── Results ── */
+        #results-screen { overflow-y: auto; flex-direction: column; }
+        .results-wrap { max-width: 720px; margin: 0 auto; padding: 24px 20px 60px; width: 100%; }
+
+        .results-header { margin-bottom: 20px; }
+        .results-header h2 { font-size: 1.8rem; margin-bottom: 4px; animation: fadeInDown 0.3s ease; }
+        .results-sub { color: var(--text-muted); font-size: 1rem; }
+
+        .sort-bar { display: flex; gap: 8px; margin-bottom: 12px; }
+        .sort-btn { padding: 6px 16px; font-size: 0.85rem; }
+        .sort-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+        #leaderboard-container { animation: slideUp 0.3s ease; }
+        .lb-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+        .lb-table th {
+            text-align: left; padding: 10px 14px; color: var(--text-muted);
+            font-weight: 500; border-bottom: 1px solid var(--bg3);
+            font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em;
+        }
+        .lb-table td { padding: 10px 14px; border-bottom: 1px solid var(--bg3); }
+        .lb-table tbody tr { transition: background 0.15s; }
+        .lb-table tbody tr:hover { background: rgba(255,255,255,0.03); }
+        .lb-row-me td { background: rgba(79,70,229,0.1); }
+        .lb-row-me td:first-child { border-left: 3px solid var(--accent); }
+        .lb-rank { color: var(--text-muted); font-weight: 600; }
+        .lb-rank.gold   { color: #f5b800; }
+        .lb-rank.silver { color: #a8a8b8; }
+        .lb-rank.bronze { color: #cd7f32; }
+
+        .ghost-banner {
+            background: rgba(245,158,11,0.08); border: 1px solid rgba(245,158,11,0.25);
+            border-radius: var(--radius); padding: 10px 16px; font-size: 0.9rem;
+            color: var(--gold); margin-bottom: 12px; animation: fadeIn 0.25s ease;
+        }
+
+        /* ── Archive ── */
+        .archive-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 10px; margin-top: 4px;
+        }
+        .archive-row {
+            background: var(--bg2); border: 1px solid var(--bg3);
+            border-radius: var(--radius); padding: 14px 16px;
+            display: flex; align-items: center; gap: 12px;
+        }
+        .arc-date { font-size: 0.78rem; color: var(--text-muted); min-width: 62px; flex-shrink: 0; }
+        .arc-pair { flex: 1; font-size: 0.9rem; font-weight: 600; }
+        .arc-done {
+            color: var(--green); font-size: 0.8rem; font-weight: 600;
+            cursor: pointer; white-space: nowrap;
+        }
+        .arc-done:hover { text-decoration: underline; }
+        .arc-play { padding: 4px 12px; font-size: 0.8rem; white-space: nowrap; }
+    </style>
+</head>
+<body>
+
+<!-- ── Navbar ── -->
+<nav class="navbar">
+    <span class="navbar-brand">Linxicon</span>
+    <div class="navbar-links">
+        <span id="date-badge" class="muted" style="font-size:0.85rem;"></span>
+        <button class="btn btn-ghost" id="back-btn" style="padding:6px 14px;">← Lobby</button>
+    </div>
+</nav>
+
+<!-- ── Loading ── -->
+<div class="screen" id="loading-screen">
+    <div class="load-card">
+        <div class="spinner" style="margin:0 auto 20px;"></div>
+        <h2>Daily Puzzle</h2>
+        <p id="loading-msg">Loading…</p>
+    </div>
+</div>
+
+<!-- ── Game ── -->
+<div class="screen" id="game-screen">
+    <div class="game-wrap">
+
+        <div id="archive-banner" style="display:none;"></div>
+
+        <div class="game-info-bar">
+            <div class="target-words">
+                <span class="word-tag start" id="start-word-tag">—</span>
+                <span class="arrow">→</span>
+                <span class="word-tag end"   id="end-word-tag">—</span>
+            </div>
+            <div class="info-right">
+                <div class="word-count-pill">Words: <strong id="word-count">2</strong></div>
+                <div class="timer" id="timer">0:00</div>
+            </div>
+        </div>
+
+        <div id="solo-board">
+            <canvas id="game-canvas"></canvas>
+        </div>
+
+        <div class="word-input-row">
+            <input type="text" id="word-input"
+                   placeholder="Type a connecting word and press Enter…"
+                   autocomplete="off" autocorrect="off" spellcheck="false" />
+            <button class="btn btn-primary" id="submit-word-btn">Add Word</button>
+        </div>
+
+        <div id="status-msg"></div>
+
+    </div>
+</div>
+
+<!-- ── Results ── -->
+<div class="screen" id="results-screen">
+    <div class="results-wrap">
+
+        <div style="margin-bottom:16px;">
+            <button class="btn btn-ghost" id="back-to-today-btn" style="display:none;">← Today's Results</button>
+        </div>
+
+        <div class="results-header" id="results-header"></div>
+
+        <p class="section-title">🏆 Leaderboard</p>
+
+        <div class="ghost-banner" id="ghost-banner" style="display:none;"></div>
+
+        <div class="sort-bar">
+            <button class="btn btn-ghost sort-btn active" id="sort-path-btn">Sort by Path</button>
+            <button class="btn btn-ghost sort-btn" id="sort-words-btn">Sort by Words</button>
+        </div>
+
+        <div id="leaderboard-container">
+            <p class="no-history">Loading…</p>
+        </div>
+
+        <div id="archive-section" style="display:none; margin-top:32px;">
+            <p class="section-title">📅 Previous Puzzles</p>
+            <div id="archive-list">
+                <p class="no-history">Loading previous puzzles…</p>
+            </div>
+        </div>
+
+    </div>
+</div>
+
+<script type="module">
+import { requireAuth }                    from "./js/auth.js";
+import { loadGlove, getEngine }           from "./js/glove.js";
+import { Graph }                          from "./js/graph.js";
+import { Renderer }                       from "./js/render.js";
+import { GameSession }                    from "./js/game.js";
+import { loadAccount, saveDailyStats }    from "./js/account.js";
+import {
+    todayStr, getDailyPair,
+    getDailyEntry, saveDailyEntry,
+    getDailyLeaderboard, getArchiveData
+} from "./js/daily-db.js";
+
+// ──────────────────────────── State ─────────────────────────
+let user, account;
+let gameSession  = null;
+let renderer     = null;
+let playingDate  = null;   // date whose leaderboard / game is active
+let isToday      = false;
+let todayDateStr = "";
+let todayPair    = null;
+let currentLb    = [];     // leaderboard entries for active results view
+let currentSort  = "pathLength";
+let ghostForSort = null;   // ghost entry preserved across sort-button clicks
+let archiveData  = [];     // [{date, startWord, endWord}]
+let archiveCompMap = new Map(); // date → boolean (user completed?)
+let timerInterval = null, timerSeconds = 0;
+
+// ──────────────────────────── Utilities ─────────────────────
+function setScreen(id) {
+    document.querySelectorAll(".screen").forEach(el => el.classList.remove("active"));
+    document.getElementById(id).classList.add("active");
+}
+
+function setStatus(text, type = "") {
+    const el = document.getElementById("status-msg");
+    el.textContent = text;
+    el.className   = type;
+}
+
+function startTimer() {
+    timerSeconds = 0;
+    clearInterval(timerInterval);
+    timerInterval = setInterval(() => {
+        timerSeconds++;
+        const m = Math.floor(timerSeconds / 60);
+        const s = String(timerSeconds % 60).padStart(2, "0");
+        document.getElementById("timer").textContent = `${m}:${s}`;
+    }, 1000);
+}
+function stopTimer() { clearInterval(timerInterval); }
+
+function fmtTime(s) {
+    const r = Math.round(s);
+    return r < 60 ? `${r}s` : `${Math.floor(r / 60)}m ${r % 60}s`;
+}
+
+function fmtDate(dateStr) {
+    return new Date(dateStr + "T12:00:00").toLocaleDateString("en-US",
+        { month: "long", day: "numeric", year: "numeric" });
+}
+function fmtDateShort(dateStr) {
+    return new Date(dateStr + "T12:00:00").toLocaleDateString("en-US",
+        { month: "short", day: "numeric" });
+}
+
+function syncCanvasSize() {
+    const c = document.getElementById("game-canvas");
+    const w = c.parentElement.clientWidth;
+    const h = c.parentElement.clientHeight;
+    if (w > 0 && h > 0 && (c.width !== w || c.height !== h)) {
+        c.width = w; c.height = h;
+    }
+}
+
+// ──────────────────────────── Game ──────────────────────────
+function startGame(dateStr, sw, ew, isTodayGame) {
+    if (renderer) renderer.stop();
+    playingDate = dateStr;
+    isToday     = isTodayGame;
+
+    const banner = document.getElementById("archive-banner");
+    if (isTodayGame) {
+        banner.style.display = "none";
+    } else {
+        banner.textContent   = "📅 Playing " + fmtDate(dateStr);
+        banner.style.display = "";
+    }
+
+    if (gameSession) gameSession.finished = true;
+    const canvas = document.getElementById("game-canvas");
+    const graph  = new Graph();
+    renderer     = new Renderer(canvas, graph);
+    gameSession  = new GameSession(canvas, renderer,
+        async (wordsAdded, solveTime) => { await onWin(wordsAdded, solveTime); },
+        (msg) => setStatus(msg, "info")
+    );
+    gameSession.initWords(sw, ew);
+
+    document.getElementById("start-word-tag").textContent = sw;
+    document.getElementById("end-word-tag").textContent   = ew;
+    document.getElementById("word-count").textContent     = "2";
+
+    stopTimer();
+    startTimer();
+    setScreen("game-screen");
+    requestAnimationFrame(syncCanvasSize);
+}
+
+async function onWin(wordsAdded, solveTime) {
+    stopTimer();
+    const engine     = getEngine();
+    const path       = engine.shortestPath(gameSession.boardState);
+    const pathLength = path ? Math.max(0, path.length - 2) : wordsAdded;
+
+    if (isToday) {
+        const entry = {
+            username:    account.username,
+            wordsUsed:   wordsAdded,
+            pathLength,
+            solveTime,
+            completedAt: new Date().toISOString()
+        };
+        await Promise.all([
+            saveDailyEntry(todayDateStr, user.uid, entry),
+            saveDailyStats(user.uid, wordsAdded, pathLength)
+        ]);
+        archiveCompMap.set(todayDateStr, true);
+        currentLb = await getDailyLeaderboard(todayDateStr);
+        await showResults(todayDateStr, currentLb, null, true);
+    } else {
+        // Archive ghost mode — no Firebase write
+        currentLb = await getDailyLeaderboard(playingDate);
+        const ghost = { wordsUsed: wordsAdded, pathLength, solveTime };
+        await showResults(playingDate, currentLb, ghost, false);
+    }
+}
+
+// ──────────────────────────── Results ───────────────────────
+async function showResults(dateStr, leaderboard, ghostEntry, isTodayView) {
+    playingDate  = dateStr;
+    currentLb    = leaderboard;
+    ghostForSort = ghostEntry;
+
+    // Header
+    const header = document.getElementById("results-header");
+    if (isTodayView) {
+        const rank = rankOf(leaderboard, "pathLength", account.username);
+        header.innerHTML = `
+            <h2 style="color:var(--green)">Solved! 🎉</h2>
+            <p class="results-sub">You ranked <strong>#${rank ?? "—"}</strong> by path · ${fmtDate(dateStr)}</p>`;
+    } else {
+        header.innerHTML = `<h2>${fmtDate(dateStr)}</h2>`;
+    }
+
+    // Back-to-today button
+    document.getElementById("back-to-today-btn").style.display = isTodayView ? "none" : "";
+
+    // Leaderboard
+    drawLeaderboard();
+
+    // Archive (only for today's results)
+    const archSec = document.getElementById("archive-section");
+    if (isTodayView) {
+        archSec.style.display = "";
+        loadArchive(); // async — renders independently
+    } else {
+        archSec.style.display = "none";
+    }
+
+    setScreen("results-screen");
+}
+
+function rankOf(entries, key, username) {
+    const sorted = sortEntries(entries, key);
+    const idx    = sorted.findIndex(e => e.username === username);
+    return idx >= 0 ? idx + 1 : null;
+}
+
+function ghostRank(entries, ghost, key) {
+    const sorted = sortEntries(entries, key);
+    const pos    = sorted.findIndex(e =>
+        e[key] > ghost[key] || (e[key] === ghost[key] && e.solveTime > ghost.solveTime));
+    return pos < 0 ? sorted.length + 1 : pos + 1;
+}
+
+function sortEntries(entries, key) {
+    return [...entries].sort((a, b) => a[key] - b[key] || a.solveTime - b.solveTime);
+}
+
+function setSort(key) {
+    currentSort = key;
+    document.getElementById("sort-path-btn").classList.toggle("active", key === "pathLength");
+    document.getElementById("sort-words-btn").classList.toggle("active", key === "wordsUsed");
+    drawLeaderboard();
+}
+
+function drawLeaderboard() {
+    const sorted    = sortEntries(currentLb, currentSort);
+    const container = document.getElementById("leaderboard-container");
+
+    // Ghost banner
+    const ghostBanner = document.getElementById("ghost-banner");
+    if (ghostForSort) {
+        const rPath  = ghostRank(currentLb, ghostForSort, "pathLength");
+        const rWords = ghostRank(currentLb, ghostForSort, "wordsUsed");
+        ghostBanner.textContent =
+            `If you'd played on ${fmtDate(playingDate)}, you would have ranked #${rPath} by path · #${rWords} by words.`;
+        ghostBanner.style.display = "";
+    } else {
+        ghostBanner.style.display = "none";
+    }
+
+    if (sorted.length === 0) {
+        container.innerHTML = '<p class="no-history" style="padding:16px 0;">No completions yet.</p>';
+        return;
+    }
+
+    const table  = document.createElement("table");
+    table.className = "lb-table";
+    table.innerHTML = `<thead><tr>
+        <th>#</th><th>Player</th><th>Path</th><th>Words</th><th>Time</th>
+    </tr></thead>`;
+    const tbody = document.createElement("tbody");
+
+    sorted.forEach((e, i) => {
+        const rank  = i + 1;
+        const isMe  = e.username === account.username;
+        const tr    = document.createElement("tr");
+        if (isMe) tr.className = "lb-row-me";
+        const rankCls = rank === 1 ? "gold" : rank === 2 ? "silver" : rank === 3 ? "bronze" : "";
+        tr.innerHTML = `
+            <td class="lb-rank ${rankCls}">${rank}</td>
+            <td>${e.username}${isMe ? " <span style='color:var(--accent);font-size:0.78rem;'>(you)</span>" : ""}</td>
+            <td>${e.pathLength}</td>
+            <td>${e.wordsUsed}</td>
+            <td>${fmtTime(e.solveTime)}</td>`;
+        tbody.appendChild(tr);
+    });
+
+    table.appendChild(tbody);
+    container.innerHTML = "";
+    container.appendChild(table);
+}
+
+// ──────────────────────────── Archive ───────────────────────
+async function loadArchive() {
+    const listEl = document.getElementById("archive-list");
+    listEl.innerHTML = '<p class="no-history">Loading previous puzzles…</p>';
+
+    if (archiveData.length === 0) {
+        archiveData = await getArchiveData(30);
+    }
+
+    const pastDays = archiveData.filter(d => d.date !== todayDateStr);
+    if (pastDays.length === 0) {
+        listEl.innerHTML = '<p class="no-history">No previous puzzles yet — check back tomorrow!</p>';
+        return;
+    }
+
+    // Check user completions in parallel
+    await Promise.all(pastDays.map(async (d) => {
+        if (!archiveCompMap.has(d.date)) {
+            const entry = await getDailyEntry(d.date, user.uid);
+            archiveCompMap.set(d.date, !!entry);
+        }
+    }));
+
+    // Render grid
+    const grid = document.createElement("div");
+    grid.className = "archive-grid";
+
+    for (const d of pastDays) {
+        const done = archiveCompMap.get(d.date) ?? false;
+        const row  = document.createElement("div");
+        row.className = "archive-row";
+        row.innerHTML = `
+            <span class="arc-date">${fmtDateShort(d.date)}</span>
+            <span class="arc-pair">${d.startWord} → ${d.endWord}</span>
+            ${done
+                ? `<span class="arc-done" data-date="${d.date}">✓ View</span>`
+                : `<button class="btn btn-ghost arc-play"
+                       data-date="${d.date}"
+                       data-sw="${d.startWord}"
+                       data-ew="${d.endWord}">Play</button>`
+            }`;
+        grid.appendChild(row);
+    }
+
+    listEl.innerHTML = "";
+    listEl.appendChild(grid);
+}
+
+// Event delegation on archive list (added once)
+document.getElementById("archive-list").addEventListener("click", async (e) => {
+    const playBtn = e.target.closest(".arc-play");
+    const viewBtn = e.target.closest(".arc-done");
+
+    if (playBtn) {
+        const { date, sw, ew } = playBtn.dataset;
+        startGame(date, sw, ew, false);
+    }
+    if (viewBtn) {
+        const date = viewBtn.dataset.date;
+        const lb   = await getDailyLeaderboard(date);
+        await showResults(date, lb, null, false);
+    }
+});
+
+// ──────────────────────────── Word input ────────────────────
+async function handleSubmit() {
+    if (!gameSession) return;
+    const input = document.getElementById("word-input");
+    const word  = input.value.trim();
+    input.value = "";
+    input.focus();
+    if (!word) return;
+
+    const result = await gameSession.submitWord(word);
+    if (result.error) { setStatus(result.error, "error"); return; }
+
+    document.getElementById("word-count").textContent = gameSession.graph.wordCount;
+
+    if (!result.connections.length)
+        setStatus(`"${result.added}" added — no connections yet.`);
+    else
+        setStatus(`"${result.added}" links to: ${result.connections.join(", ")}`, "success");
+}
+
+document.getElementById("submit-word-btn").addEventListener("click", handleSubmit);
+document.getElementById("word-input").addEventListener("keydown",
+    (e) => { if (e.key === "Enter") handleSubmit(); });
+
+// ──────────────────────────── Sort buttons ──────────────────
+document.getElementById("sort-path-btn").addEventListener("click",  () => setSort("pathLength"));
+document.getElementById("sort-words-btn").addEventListener("click", () => setSort("wordsUsed"));
+
+// ──────────────────────────── Navigation ────────────────────
+document.getElementById("back-to-today-btn").addEventListener("click", async () => {
+    currentLb = await getDailyLeaderboard(todayDateStr);
+    await showResults(todayDateStr, currentLb, null, true);
+});
+
+document.getElementById("back-btn").addEventListener("click", () => {
+    window.location.href = "lobby.html";
+});
+
+window.addEventListener("resize", syncCanvasSize);
+window.addEventListener("beforeunload", () => {
+    if (renderer) renderer.stop();
+    stopTimer();
+});
+
+// ──────────────────────────── Init ──────────────────────────
+setScreen("loading-screen");
+
+try {
+    document.getElementById("loading-msg").textContent = "Loading embeddings…";
+    await loadGlove("game/data/embeddings.bin");
+} catch (err) {
+    document.getElementById("loading-msg").textContent =
+        "Failed to load embeddings. Is game/data/embeddings.bin present?";
+    console.error("[daily] loadGlove failed:", err);
+}
+
+user    = await requireAuth();
+account = await loadAccount(user.uid);
+
+todayDateStr = todayStr();
+document.getElementById("date-badge").textContent =
+    "📅 Daily · " + fmtDateShort(todayDateStr);
+
+try {
+    document.getElementById("loading-msg").textContent = "Fetching today's puzzle…";
+    todayPair = await getDailyPair(todayDateStr);
+} catch (err) {
+    document.getElementById("loading-msg").textContent = "Failed to load today's puzzle.";
+    console.error("[daily] getDailyPair failed:", err);
+}
+
+// If already completed today, go straight to results
+const myTodayEntry = await getDailyEntry(todayDateStr, user.uid);
+if (myTodayEntry) {
+    currentLb = await getDailyLeaderboard(todayDateStr);
+    await showResults(todayDateStr, currentLb, null, true);
+} else {
+    startGame(todayDateStr, todayPair.startWord, todayPair.endWord, true);
+}
+</script>
+</body>
+</html>
