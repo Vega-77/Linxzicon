@@ -88,7 +88,7 @@
             align-items: center;
             gap: 10px;
         }
-        #opponent-bar.visible { display: flex; }
+        #opponent-bar.visible { display: flex; animation: fadeIn 0.2s ease; }
         #opponent-bar strong { color: var(--text); }
         .opp-words-badge {
             margin-left: auto;
@@ -196,13 +196,15 @@
             flex-shrink: 0;
             flex-wrap: wrap;
         }
-        #results-bar.visible { display: flex; }
+        #results-bar.visible { display: flex; animation: slideUp 0.3s ease; }
         #results-verdict { font-size: 1.4rem; font-weight: 800; }
         #results-verdict.victory { color: var(--green); }
         #results-verdict.defeat  { color: var(--red); }
         #results-elo { font-size: 1.1rem; font-weight: 700; }
         .elo-gain { color: var(--green); }
         .elo-loss { color: var(--red); }
+        #results-round  { font-size: 0.78rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
+        #results-series { font-size: 1.15rem; font-weight: 700; letter-spacing: 1px; }
 
         /* ── Status message ── */
         #status-msg {
@@ -319,6 +321,10 @@
         <!-- Results bar (multiplayer end state) -->
         <div id="results-bar">
             <div id="results-verdict"></div>
+            <div style="display:flex;flex-direction:column;gap:2px;">
+                <div id="results-round"></div>
+                <div id="results-series"></div>
+            </div>
             <div id="results-elo"></div>
             <div id="results-stats"></div>
             <div class="win-btn-row">
@@ -547,24 +553,41 @@
         );
 
         let rematchClicked = false;
+        let seriesScore    = { mine: 0, opponent: 0 };
+        let seriesOver     = false;
 
         function showMultiResults(won, eloChange, wordsUsed, solveTime) {
             stopTimer();
             document.getElementById("word-input-row").style.display = "none";
+
+            // Re-trigger slide-up animation even if bar was previously shown
             const bar = document.getElementById("results-bar");
+            bar.classList.remove("visible");
+            bar.offsetHeight; // force reflow
             bar.classList.add("visible");
 
-            const verdict = document.getElementById("results-verdict");
-            verdict.textContent = won ? "Victory" : "Defeat";
-            verdict.className   = won ? "victory"  : "defeat";
+            const round = seriesScore.mine + seriesScore.opponent;
 
-            const eloEl  = document.getElementById("results-elo");
-            const sign   = eloChange >= 0 ? "+" : "";
-            const cls    = eloChange >= 0 ? "elo-gain" : "elo-loss";
+            const verdict = document.getElementById("results-verdict");
+            verdict.textContent = seriesOver
+                ? (seriesScore.mine >= 2 ? "Match Won!" : "Match Defeated")
+                : (won ? "Victory" : "Defeat");
+            verdict.className = won ? "victory" : "defeat";
+
+            document.getElementById("results-round").textContent  = `Round ${round} of 3`;
+            document.getElementById("results-series").textContent = `${seriesScore.mine} – ${seriesScore.opponent}`;
+
+            const eloEl = document.getElementById("results-elo");
+            const sign  = eloChange >= 0 ? "+" : "";
+            const cls   = eloChange >= 0 ? "elo-gain" : "elo-loss";
             eloEl.innerHTML = `<span class="${cls}">${sign}${eloChange} ELO</span>`;
 
             document.getElementById("results-stats").textContent =
                 `${wordsUsed} word${wordsUsed !== 1 ? "s" : ""} · ${fmtTime(solveTime)}`;
+
+            const btn = document.getElementById("rematch-btn");
+            btn.textContent = seriesOver ? "New Match" : "Next Round";
+            btn.disabled    = false;
         }
 
         const multiSession = new MultiplayerSession(
@@ -576,13 +599,16 @@
                 const sw = startWord.toLowerCase();
                 const ew = endWord.toLowerCase();
 
+                // If the previous series was complete, reset for a new one
+                if (seriesOver) {
+                    seriesScore = { mine: 0, opponent: 0 };
+                    seriesOver  = false;
+                }
+
                 // Reset results bar from any previous round
                 document.getElementById("results-bar").classList.remove("visible");
                 document.getElementById("word-input-row").style.display = "";
                 rematchClicked = false;
-                const rBtn = document.getElementById("rematch-btn");
-                rBtn.textContent = "Rematch";
-                rBtn.disabled    = false;
 
                 // Initialise opponent board state and graph
                 const engine = getEngine();
@@ -636,6 +662,10 @@
 
             // onGameOver
             async ({ won, opponentElo, myElo }) => {
+                if (won) seriesScore.mine++;
+                else     seriesScore.opponent++;
+                seriesOver = seriesScore.mine >= 2 || seriesScore.opponent >= 2;
+
                 const eloChange = calcEloDelta(myElo, opponentElo, won);
 
                 if (!won && oppBoardState) {
@@ -656,10 +686,10 @@
                 document.getElementById("matchmaking-msg").textContent = msg;
             },
 
-            // onRematchRequested — opponent clicked Rematch first
+            // onRematchRequested — opponent clicked Next Round / New Match first
             () => {
                 const btn = document.getElementById("rematch-btn");
-                btn.textContent = "Accept Rematch";
+                btn.textContent = seriesOver ? "Accept New Match" : "Accept Next Round";
                 btn.disabled    = false;
             }
         );
