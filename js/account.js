@@ -30,6 +30,13 @@ export class Account {
         this.multiAvgTime     = d.multiAvgTime     ?? 0;
         this.winStreak        = d.winStreak        ?? 0;
         this.currentStreak    = d.currentStreak    ?? 0;
+
+        this.dailyPlayed      = d.dailyPlayed      ?? 0;
+        this.dailyStreak      = d.dailyStreak      ?? 0;
+        this.dailyBestStreak  = d.dailyBestStreak  ?? 0;
+        this.dailyAvgWords    = d.dailyAvgWords    ?? 0;
+        this.dailyAvgPath     = d.dailyAvgPath     ?? 0;
+        this.dailyLastDate    = d.dailyLastDate     ?? "";
     }
 
     get soloWinRate()  {
@@ -63,8 +70,14 @@ export class Account {
             multiLost:     this.multiLost,
             multiAvgWords: this.multiAvgWords,
             multiAvgTime:  this.multiAvgTime,
-            winStreak:     this.winStreak,
-            currentStreak: this.currentStreak,
+            winStreak:       this.winStreak,
+            currentStreak:   this.currentStreak,
+            dailyPlayed:     this.dailyPlayed,
+            dailyStreak:     this.dailyStreak,
+            dailyBestStreak: this.dailyBestStreak,
+            dailyAvgWords:   this.dailyAvgWords,
+            dailyAvgPath:    this.dailyAvgPath,
+            dailyLastDate:   this.dailyLastDate,
         };
     }
 }
@@ -187,6 +200,35 @@ async function _saveMultiResult(uid, won, wordsUsed, solveTime, opponentElo) {
         console.error("[account] _saveMultiResult write FAILED:", err);
     }
     return account;
+}
+
+// ============================================================
+// saveDailyStats
+// Called once when user completes today's puzzle.
+// Updates streak, played count, and running averages.
+// Past-day archive plays do NOT call this.
+// ============================================================
+export async function saveDailyStats(uid, wordsUsed, pathLength) {
+    const account = await loadAccount(uid);
+    if (!account) return;
+
+    const today = new Date().toISOString().slice(0, 10);
+    const prev  = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
+
+    if (account.dailyLastDate === today) return; // guard: already counted today
+
+    account.dailyPlayed++;
+    account.dailyAvgWords = ((account.dailyAvgWords * (account.dailyPlayed - 1)) + wordsUsed) / account.dailyPlayed;
+    account.dailyAvgPath  = ((account.dailyAvgPath  * (account.dailyPlayed - 1)) + pathLength) / account.dailyPlayed;
+    account.dailyStreak   = account.dailyLastDate === prev ? account.dailyStreak + 1 : 1;
+    if (account.dailyStreak > account.dailyBestStreak) account.dailyBestStreak = account.dailyStreak;
+    account.dailyLastDate = today;
+
+    try {
+        await update(ref(database, `users/${uid}`), account.toObject());
+    } catch (err) {
+        console.error("[account] saveDailyStats write FAILED:", err);
+    }
 }
 
 export function calcElo(playerElo, opponentElo, won) {

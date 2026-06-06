@@ -156,6 +156,19 @@
         .stats-grid-4 .stat-card:nth-child(6) { animation-delay: 0.45s; }
         .stats-grid-4 .stat-card:nth-child(7) { animation-delay: 0.52s; }
         .stats-grid-4 .stat-card:nth-child(8) { animation-delay: 0.59s; }
+        .stats-grid-5d .stat-card:nth-child(1) { animation-delay: 0.05s; }
+        .stats-grid-5d .stat-card:nth-child(2) { animation-delay: 0.12s; }
+        .stats-grid-5d .stat-card:nth-child(3) { animation-delay: 0.19s; }
+        .stats-grid-5d .stat-card:nth-child(4) { animation-delay: 0.26s; }
+        .stats-grid-5d .stat-card:nth-child(5) { animation-delay: 0.33s; }
+        .stats-grid-5d {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 12px;
+        }
+        @media (max-width: 700px) {
+            .stats-grid-5d { grid-template-columns: repeat(2, 1fr); }
+        }
     </style>
 </head>
 <body>
@@ -237,6 +250,31 @@
         <div class="stat-card">
             <div class="stat-value" id="stat-multi-cur-streak">—</div>
             <div class="stat-label">Current Streak</div>
+        </div>
+    </div>
+
+    <!-- ── Daily Stats ── -->
+    <p class="section-title">📅 Daily</p>
+    <div class="stats-grid-5d">
+        <div class="stat-card">
+            <div class="stat-value" id="stat-daily-played">—</div>
+            <div class="stat-label">Puzzles Solved</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value" id="stat-daily-streak" style="color:var(--gold)">—</div>
+            <div class="stat-label">Current Streak</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value" id="stat-daily-best-streak" style="color:var(--gold)">—</div>
+            <div class="stat-label">Best Streak</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value" id="stat-daily-avg-path" style="color:var(--accent)">—</div>
+            <div class="stat-label">Avg Path</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value" id="stat-daily-avg-words">—</div>
+            <div class="stat-label">Avg Words</div>
         </div>
     </div>
 
