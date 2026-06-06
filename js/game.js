@@ -16,81 +16,6 @@ import { saveGameResult } from "./account.js";
 import { requireAuth }    from "./auth.js";
 
 // ============================================================
-// WORD_BANK
-// Curated words guaranteed to exist in the GloVe vocabulary.
-// Pairs are chosen at random; trivial pairs (words already
-// similar enough to connect directly) are skipped.
-// ============================================================
-const WORD_BANK = [
-    // original staples
-    "ocean", "forest", "music", "castle", "diamond",
-    "dragon", "thunder", "garden", "mirror", "shadow",
-    "silver", "golden", "winter", "summer", "river",
-    "mountain", "desert", "island", "flame", "storm",
-    "crystal", "cloud", "ancient", "sword", "kingdom",
-    "tiger", "eagle", "wolf", "whale", "falcon",
-    "piano", "violin", "guitar", "canvas", "marble",
-    "captain", "voyage", "jungle", "prairie", "glacier",
-    // water & coastline
-    "lake", "stream", "waterfall", "harbor", "lagoon",
-    "reef", "tide", "delta", "torrent", "cascade",
-    // terrain
-    "valley", "canyon", "volcano", "cave", "plateau",
-    "cliff", "tundra", "ravine", "dune", "crevasse",
-    // sky & weather
-    "frost", "snow", "mist", "lightning", "rainbow",
-    "tornado", "blizzard", "tempest", "gale", "vortex",
-    // flora
-    "thorn", "vine", "fern", "moss", "petal",
-    "willow", "maple", "cedar", "thistle", "clover",
-    // large animals
-    "jaguar", "elephant", "buffalo", "gorilla", "giraffe",
-    "rhino", "bison", "panther", "cheetah", "moose",
-    // birds
-    "raven", "crane", "sparrow", "hawk", "heron",
-    "dove", "parrot", "pelican", "swift", "osprey",
-    // aquatic & reptile
-    "dolphin", "salmon", "cobra", "lizard", "turtle",
-    "octopus", "lobster", "walrus", "otter", "crab",
-    // small mammals
-    "badger", "beaver", "hedgehog", "squirrel", "lynx",
-    "chipmunk", "lemur", "mongoose", "weasel", "ferret",
-    // celestial
-    "moon", "star", "comet", "nebula", "dawn",
-    "dusk", "twilight", "eclipse", "cosmos", "aurora",
-    // materials
-    "iron", "copper", "quartz", "amber", "ivory",
-    "granite", "obsidian", "sapphire", "emerald", "onyx",
-    // music
-    "drum", "trumpet", "melody", "rhythm", "chorus",
-    "verse", "anthem", "ballad", "sonnet", "lyric",
-    // arts & literature
-    "mosaic", "portrait", "sculpture", "sketch", "palette",
-    "mural", "prose", "fable", "legend", "chronicle",
-    // medieval & exploration
-    "shield", "tower", "throne", "crown", "armor",
-    "lance", "dungeon", "citadel", "fortress", "rampart",
-    // mythology & mystery
-    "ghost", "spirit", "myth", "amulet", "oracle",
-    "rune", "phantom", "serpent", "specter", "wraith",
-    // abstract & emotion
-    "sorrow", "glory", "courage", "wisdom", "silence",
-    "memory", "dream", "chaos", "grace", "honor",
-    // navigation & exploration
-    "compass", "anchor", "lighthouse", "horizon", "exile",
-    "vessel", "atlas", "current", "chart", "beacon",
-    // structures & places
-    "lantern", "clock", "bridge", "library", "market",
-    "forge", "cabin", "cellar", "chapel", "vault",
-    // nature forces
-    "ember", "smoke", "surge", "erosion", "gravity",
-    "magnet", "fossil", "prism", "vapor", "carbon",
-    // food & plants
-    "honey", "walnut", "chestnut", "pepper", "ginger",
-    "lavender", "vanilla", "cinnamon", "saffron", "sage",
-];
-
-// ============================================================
 // GameSession
 // One round of gameplay. Used directly for solo mode.
 // MultiplayerSession in multiplayer.js wraps this class.
@@ -123,7 +48,7 @@ export class GameSession {
     // Returns { startWord, endWord } so the UI can display them.
     // ----------------------------------------------------------
     init() {
-        const [w1, w2] = pickStartPair();
+        const [w1, w2] = pickDistantPair();
         return this._setup(w1, w2);
     }
 
@@ -183,7 +108,7 @@ export class GameSession {
         const { state: newState, result } = this.engine.addWord(this.boardState, word);
 
         if (!result.accepted) {
-            if (result.reason === 'unknown_word')    return { error: `"${word}" is not in the vocabulary.` };
+            if (result.reason === 'unknown_word')     return { error: `"${word}" is not in the vocabulary.` };
             if (result.reason === 'already_on_board') return { error: `"${word}" is already on the board.` };
         }
 
@@ -225,26 +150,46 @@ export class GameSession {
 }
 
 // ============================================================
-// pickStartPair
-// Returns two distinct words from WORD_BANK that are not
-// already too similar (avoids trivially easy starting pairs).
+// pickDistantPair
+// Samples the full 200k vocabulary to find the most semantically
+// distant non-trivial pair each game — words far apart enough
+// to be challenging but still positively related (similarity ≥ 0.05)
+// so a connecting path exists through the word network.
 // ============================================================
-function pickStartPair() {
+function pickDistantPair() {
     const engine = getEngine();
-    for (let attempt = 0; attempt < 20; attempt++) {
-        const [w1, w2] = pickTwoDistinct(WORD_BANK);
-        if (!engine) return [w1, w2];
-        const info = engine.pairSimilarity(w1, w2);
-        if (info && !info.isTrivial) return [w1, w2];
-    }
-    return pickTwoDistinct(WORD_BANK);
-}
+    if (!engine) return ["ocean", "forest"];
 
-function pickTwoDistinct(arr) {
-    const i = Math.floor(Math.random() * arr.length);
-    let   j = Math.floor(Math.random() * (arr.length - 1));
-    if (j >= i) j++;
-    return [arr[i], arr[j]];
+    // Sample 30 random words; find the pair with lowest similarity
+    // that is non-trivial (not already directly connectable).
+    // Retry up to 3 times in case the sample is unlucky.
+    for (let attempt = 0; attempt < 3; attempt++) {
+        const pool = engine.randomWords(30);
+        let bestPair = null, bestSim = Infinity;
+
+        for (let i = 0; i < pool.length; i++) {
+            for (let j = i + 1; j < pool.length; j++) {
+                const info = engine.pairSimilarity(pool[i], pool[j]);
+                if (!info || info.isTrivial) continue;
+                if (info.similarity < 0.05) continue; // too disconnected
+                if (info.similarity < bestSim) {
+                    bestSim  = info.similarity;
+                    bestPair = [pool[i], pool[j]];
+                }
+            }
+        }
+        if (bestPair) return bestPair;
+    }
+
+    // Fallback: any non-trivial pair
+    const pool = engine.randomWords(20);
+    for (let i = 0; i < pool.length; i++) {
+        for (let j = i + 1; j < pool.length; j++) {
+            const info = engine.pairSimilarity(pool[i], pool[j]);
+            if (info && !info.isTrivial) return [pool[i], pool[j]];
+        }
+    }
+    return engine.randomWords(2);
 }
 
 // ============================================================
@@ -253,5 +198,5 @@ function pickTwoDistinct(arr) {
 // start/end pair and write it to Firebase for both players.
 // ============================================================
 export function pickStartEnd() {
-    return pickStartPair();
+    return pickDistantPair();
 }

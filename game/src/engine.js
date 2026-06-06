@@ -29,6 +29,14 @@ export class LinxiconEngine {
     return this._emb.has(word.toLowerCase());
   }
 
+  randomWords(n) {
+    if (!this._wordList) this._wordList = [...this._emb.keys()];
+    const result = [], len = this._wordList.length;
+    for (let i = 0; i < n; i++)
+      result.push(this._wordList[Math.floor(Math.random() * len)]);
+    return result;
+  }
+
   cosineSimilarity(word1, word2) {
     const e1 = this._emb.get(word1.toLowerCase());
     const e2 = this._emb.get(word2.toLowerCase());
