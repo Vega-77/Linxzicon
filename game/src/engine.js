@@ -18,7 +18,7 @@ export class LinxiconEngine {
    */
   constructor(embeddings, options = {}) {
     this._emb      = embeddings;
-    this._defaultK = options.adaptiveK ?? 2.5; // raised from 2.0 → 2.5
+    this._defaultK = options.adaptiveK ?? 3.5; // raised from 2.5 to 3.5
   }
 
   // ---------------------------------------------------------------------------
