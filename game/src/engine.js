@@ -29,11 +29,11 @@ export class LinxiconEngine {
     return this._emb.has(word.toLowerCase());
   }
 
-  randomWords(n) {
+  randomWords(n, limit) {
     if (!this._wordList) this._wordList = [...this._emb.keys()];
-    const result = [], len = this._wordList.length;
+    const result = [], cap = Math.min(limit ?? this._wordList.length, this._wordList.length);
     for (let i = 0; i < n; i++)
-      result.push(this._wordList[Math.floor(Math.random() * len)]);
+      result.push(this._wordList[Math.floor(Math.random() * cap)]);
     return result;
   }
 

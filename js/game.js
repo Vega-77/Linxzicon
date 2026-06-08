@@ -155,6 +155,10 @@ export class GameSession {
 // distant non-trivial pair each game — words far apart enough
 // to be challenging but still positively related (similarity ≥ 0.05)
 // so a connecting path exists through the word network.
+// Only the top PAIR_VOCAB_LIMIT words (by GloVe frequency) are eligible
+// as start/end words. Connecting words typed by the player are unlimited.
+const PAIR_VOCAB_LIMIT = 40000;
+
 // ============================================================
 function pickDistantPair() {
     const engine = getEngine();
@@ -164,7 +168,7 @@ function pickDistantPair() {
     // that is non-trivial (not already directly connectable).
     // Retry up to 3 times in case the sample is unlucky.
     for (let attempt = 0; attempt < 3; attempt++) {
-        const pool = engine.randomWords(30);
+        const pool = engine.randomWords(30, PAIR_VOCAB_LIMIT);
         let bestPair = null, bestSim = Infinity;
 
         for (let i = 0; i < pool.length; i++) {
@@ -182,14 +186,14 @@ function pickDistantPair() {
     }
 
     // Fallback: any non-trivial pair
-    const pool = engine.randomWords(20);
+    const pool = engine.randomWords(20, PAIR_VOCAB_LIMIT);
     for (let i = 0; i < pool.length; i++) {
         for (let j = i + 1; j < pool.length; j++) {
             const info = engine.pairSimilarity(pool[i], pool[j]);
             if (info && !info.isTrivial) return [pool[i], pool[j]];
         }
     }
-    return engine.randomWords(2);
+    return engine.randomWords(2, PAIR_VOCAB_LIMIT);
 }
 
 // ============================================================
