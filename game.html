@@ -347,14 +347,10 @@
         <!-- Results bar (multiplayer end state) -->
         <div id="results-bar">
             <div id="results-verdict"></div>
-            <div style="display:flex;flex-direction:column;gap:2px;">
-                <div id="results-round"></div>
-                <div id="results-series"></div>
-            </div>
             <div id="results-elo"></div>
             <div id="results-stats"></div>
             <div class="win-btn-row">
-                <button class="btn btn-primary" id="rematch-btn">Rematch</button>
+                <button class="btn btn-primary" id="rematch-btn">Next Round</button>
                 <button class="btn btn-ghost"   id="go-lobby-btn-multi">Lobby</button>
             </div>
         </div>
@@ -605,9 +601,7 @@
         );
 
         let rematchClicked  = false;
-        let seriesScore     = { mine: 0, opponent: 0 };
-        let seriesOver      = false;
-        const sessionResults = []; // win/loss history for current session
+        const sessionResults = []; // win/loss history for current session (never resets)
         let hintTimerId     = null;
         let skipTimerId     = null;
         let hintRequested   = false;
@@ -623,16 +617,9 @@
             bar.offsetHeight; // force reflow
             bar.classList.add("visible");
 
-            const round = seriesScore.mine + seriesScore.opponent;
-
             const verdict = document.getElementById("results-verdict");
-            verdict.textContent = seriesOver
-                ? (seriesScore.mine >= 2 ? "Match Won!" : "Match Defeated")
-                : (won ? "Victory" : "Defeat");
-            verdict.className = won ? "victory" : "defeat";
-
-            document.getElementById("results-round").textContent  = `Round ${round} of 3`;
-            document.getElementById("results-series").textContent = `${seriesScore.mine} – ${seriesScore.opponent}`;
+            verdict.textContent = won ? "Victory" : "Defeat";
+            verdict.className   = won ? "victory" : "defeat";
 
             const eloEl = document.getElementById("results-elo");
             const sign  = eloChange >= 0 ? "+" : "";
@@ -643,7 +630,7 @@
                 `${wordsUsed} word${wordsUsed !== 1 ? "s" : ""} · ${fmtTime(solveTime)}`;
 
             const btn = document.getElementById("rematch-btn");
-            btn.textContent = seriesOver ? "New Match" : "Next Round";
+            btn.textContent = "Next Round";
             btn.disabled    = false;
         }
 
@@ -656,11 +643,7 @@
                 const sw = startWord.toLowerCase();
                 const ew = endWord.toLowerCase();
 
-                // If the previous series was complete, reset for a new one
-                if (seriesOver) {
-                    seriesScore = { mine: 0, opponent: 0 };
-                    seriesOver  = false;
-                }
+                oppRenderer.hideLabels = true; // re-hide for each new round
 
                 // Reset results bar from any previous round
                 document.getElementById("results-bar").classList.remove("visible");
@@ -747,10 +730,6 @@
                 clearTimeout(skipTimerId);
                 document.getElementById("multi-assist-row").classList.remove("visible");
 
-                if (won) seriesScore.mine++;
-                else     seriesScore.opponent++;
-                seriesOver = seriesScore.mine >= 2 || seriesScore.opponent >= 2;
-
                 // Update session win/loss circles
                 sessionResults.push(won);
                 const recEl = document.getElementById("session-record");
@@ -787,18 +766,27 @@
                 document.getElementById("matchmaking-msg").textContent = msg;
             },
 
-            // onRematchRequested — opponent clicked Next Round / New Match first
+            // onRematchRequested — opponent clicked Next Round first
             () => {
                 const btn = document.getElementById("rematch-btn");
-                btn.textContent = seriesOver ? "Accept New Match" : "Accept Next Round";
+                btn.textContent = "Accept Next Round";
                 btn.disabled    = false;
             },
 
-            // onHintGranted — both players agreed, hint word revealed
-            (word, connectedTo) => {
-                setStatus(`💡 Hint: try "${word}" — connects to "${connectedTo}"`, "info");
+            // onHintGranted — auto-submit the hint word onto the player's board
+            async (word, _connectedTo) => {
                 document.getElementById("hint-btn").disabled = true;
                 document.getElementById("hint-waiting").textContent = "";
+                const result = await activeSubmit(word);
+                if (!result?.error) {
+                    refreshWordCount();
+                    setStatus(
+                        result?.connections?.length
+                            ? `💡 Hint "${word}" added — links to: ${result.connections.join(", ")}`
+                            : `💡 Hint "${word}" added to board`,
+                        "info"
+                    );
+                }
             },
 
             // onSkipGranted — both players agreed to skip this pair (handled via _startRematch → onMatchFound)

@@ -2,11 +2,11 @@
 // render.js — with debug logging to diagnose invisible nodes
 // ============================================================
 
-const REPULSION = 50000;
-const SPRING    = 0.06;
-const REST_LEN  = 200;
-const DAMPING   = 0.85;
-const GRAVITY   = 0.008;
+const REPULSION = 22000;
+const SPRING    = 0.05;
+const REST_LEN  = 160;
+const DAMPING   = 0.70;
+const GRAVITY   = 0.03;
 const TIME_STEP = 0.5;
 
 const NODE_RADIUS  = 30;
@@ -128,6 +128,11 @@ export class Renderer {
         const nodes = Array.from(this.graph.nodes.values());
         const cx    = this.canvas.width  / 2;
         const cy    = this.canvas.height / 2;
+
+        // Skip physics when nodes have nearly stopped moving
+        let totalKE = 0;
+        for (const n of nodes) if (!n.pinned) totalKE += n.vx*n.vx + n.vy*n.vy;
+        if (totalKE < 0.05) return;
 
         for (let i = 0; i < nodes.length; i++) {
             for (let j = i + 1; j < nodes.length; j++) {

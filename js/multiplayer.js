@@ -401,19 +401,17 @@ export class MultiplayerSession {
                 return;
             }
 
-            // Game-over detection — use _gameOverFired so winner (who set finished=true
-            // in submitWord before Firebase echoed back) still gets this block exactly once
+            // Game-over detection — _gameOverFired ensures this fires exactly once per game
             if (game.status === "finished" && !this._gameOverFired) {
                 this._gameOverFired = true;
                 const iWon = game.winner === this.myUid;
                 console.log("[multi] game over, won:", iWon);
-                // Winner already called onGameOver immediately in submitWord;
-                // only fire here for the loser
                 if (!this.finished) {
                     this.finished = true;
                     this._cancelDisconnect();
-                    this.onGameOver({ won: iWon, opponentElo: this.opponentElo, myElo: this.myElo });
                 }
+                // Fire for both winner and loser — winner is now determined by Firebase
+                this.onGameOver({ won: iWon, opponentElo: this.opponentElo, myElo: this.myElo });
             }
 
             // Hint detection — both players requested a hint
@@ -475,12 +473,13 @@ export class MultiplayerSession {
             return idx >= 0 && !state.edges.some(([i, j]) => i === idx || j === idx);
         });
 
-        const target = isolated[0] ?? startWord;
-        const pool   = engine.randomWords(500, 20000);
-        const hint   = pool.find(w =>
-            !state.words.includes(w) &&
-            engine.pairSimilarity(w, target)?.isTrivial
-        );
+        const target  = isolated[0] ?? startWord;
+        const ordered = engine.wordList(15000);
+        let hint = null;
+        for (const w of ordered) {
+            if (state.words.includes(w)) continue;
+            if (engine.pairSimilarity(w, target)?.isTrivial) { hint = w; break; }
+        }
 
         if (hint) {
             set(ref(database, `games/${this.gameId}/hintWord`),
@@ -526,44 +525,53 @@ export class MultiplayerSession {
         if (result.won) {
             this.finished = true;
             this._cancelDisconnect();
-            // Show the winner's overlay immediately without waiting for Firebase round-trip
-            this.onGameOver({ won: true, opponentElo: this.opponentElo, myElo: this.myElo });
-            {
-                let done = false;
-                for (let i = 0; i < 3; i++) {
-                    try {
-                        await update(ref(database, `games/${this.gameId}`), {
-                            status: "finished",
-                            winner: this.myUid
-                        });
-                        done = true;
-                        break;
-                    } catch {
-                        if (i < 2) await new Promise(r => setTimeout(r, 500 * (i + 1)));
-                    }
+            // Use a transaction with timestamp so the first finisher wins if both complete simultaneously
+            const nowMs = Date.now();
+            let isConfirmedWinner = false;
+            for (let i = 0; i < 3; i++) {
+                try {
+                    const txResult = await runTransaction(
+                        ref(database, `games/${this.gameId}`),
+                        (current) => {
+                            if (!current) return current;
+                            if (current.status === 'finished') {
+                                // Keep whichever player finished earlier by client timestamp
+                                if (typeof current.finishedAtMs === 'number' && current.finishedAtMs <= nowMs) {
+                                    return; // abort — opponent was earlier
+                                }
+                            }
+                            return { ...current, status: 'finished', winner: this.myUid, finishedAtMs: nowMs };
+                        }
+                    );
+                    isConfirmedWinner = txResult.snapshot?.val()?.winner === this.myUid;
+                    break;
+                } catch {
+                    if (i < 2) await new Promise(r => setTimeout(r, 500 * (i + 1)));
                 }
-                if (!done) console.error("[multi] failed to mark game finished — opponent may not see game over");
             }
-            const winPath = this.gameSession.engine
-                ? this.gameSession.engine.shortestPath(this.gameSession.boardState)
-                : null;
-            await saveGameResult(
-                this.myUid, true,
-                this.gameSession.wordsAdded,
-                this.gameSession.getElapsed(),
-                this.opponentElo,
-                "multiplayer",
-                {
-                    startWord:        this.gameSession.startWord        ?? "",
-                    endWord:          this.gameSession.endWord          ?? "",
-                    totalGraphWords:  this.gameSession.graph ? this.gameSession.graph.wordCount : this.gameSession.wordsAdded,
-                    wordsList:        [...(this.gameSession.wordsList ?? [])],
-                    opponentUid:      this.opponentUid      ?? "",
-                    opponentUsername: this.opponentUsername ?? "",
-                    actualPath:       winPath ?? [],
-                    bestPathLength:   winPath ? winPath.length : 0,
-                }
-            );
+            if (isConfirmedWinner) {
+                const winPath = this.gameSession.engine
+                    ? this.gameSession.engine.shortestPath(this.gameSession.boardState)
+                    : null;
+                await saveGameResult(
+                    this.myUid, true,
+                    this.gameSession.wordsAdded,
+                    this.gameSession.getElapsed(),
+                    this.opponentElo,
+                    "multiplayer",
+                    {
+                        startWord:        this.gameSession.startWord        ?? "",
+                        endWord:          this.gameSession.endWord          ?? "",
+                        totalGraphWords:  this.gameSession.graph ? this.gameSession.graph.wordCount : this.gameSession.wordsAdded,
+                        wordsList:        [...(this.gameSession.wordsList ?? [])],
+                        opponentUid:      this.opponentUid      ?? "",
+                        opponentUsername: this.opponentUsername ?? "",
+                        actualPath:       winPath ?? [],
+                        bestPathLength:   winPath ? winPath.length : 0,
+                    }
+                );
+            }
+            // onGameOver fires via _listenToGame for both players
         }
 
         return result;

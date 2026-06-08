@@ -37,6 +37,12 @@ export class LinxiconEngine {
     return result;
   }
 
+  wordList(limit) {
+    if (!this._wordList) this._wordList = [...this._emb.keys()];
+    const cap = Math.min(limit ?? this._wordList.length, this._wordList.length);
+    return this._wordList.slice(0, cap);
+  }
+
   cosineSimilarity(word1, word2) {
     const e1 = this._emb.get(word1.toLowerCase());
     const e2 = this._emb.get(word2.toLowerCase());
