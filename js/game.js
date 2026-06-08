@@ -177,7 +177,7 @@ export class GameSession {
 // so a connecting path exists through the word network.
 // Only the top PAIR_VOCAB_LIMIT words (by GloVe frequency) are eligible
 // as start/end words. Connecting words typed by the player are unlimited.
-const PAIR_VOCAB_LIMIT = 40000;
+const PAIR_VOCAB_LIMIT = 25000;
 
 // ============================================================
 function pickDistantPair() {
