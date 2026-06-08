@@ -382,9 +382,11 @@
     document.getElementById("matchmaking-msg").textContent = "Preparing word engine…";
     initDownloadManager();
 
+    let embeddingsOk = true;
     try {
         await awaitEmbeddings();
     } catch (err) {
+        embeddingsOk = false;
         if (err?.message === 'embeddings-declined') {
             document.getElementById("matchmaking-msg").textContent =
                 "Download required to play — refresh and accept the download prompt.";
@@ -393,8 +395,9 @@
                 "Failed to load word engine — is game/data/embeddings.bin present?";
             console.error("[game.html] awaitEmbeddings failed:", err);
         }
-        return;
     }
+
+    if (embeddingsOk) { await (async () => { // ── game init (skipped if embeddings failed) ──
 
     // Hide the panel that doesn't apply to this mode
     if (mode === "solo") {
@@ -732,6 +735,8 @@
         .addEventListener("click", () => { window.location.href = "lobby.html"; });
     document.getElementById("play-again-btn")
         .addEventListener("click", () => { window.location.reload(); });
+
+    })(); } // end game-init IIFE
 </script>
 </body>
 </html>

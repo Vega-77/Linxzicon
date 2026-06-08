@@ -572,10 +572,12 @@ window.addEventListener("beforeunload", () => {
 setScreen("loading-screen");
 
 initDownloadManager();
+let embeddingsOk = true;
 try {
     document.getElementById("loading-msg").textContent = "Preparing word engine…";
     await awaitEmbeddings();
 } catch (err) {
+    embeddingsOk = false;
     if (err?.message === 'embeddings-declined') {
         document.getElementById("loading-msg").textContent =
             "Download required to play — refresh and accept the download prompt.";
@@ -585,6 +587,8 @@ try {
         console.error("[daily] awaitEmbeddings failed:", err);
     }
 }
+
+if (embeddingsOk) { await (async () => { // ── daily init (skipped if embeddings failed) ──
 
 user    = await requireAuth();
 account = await loadAccount(user.uid);
@@ -609,6 +613,8 @@ if (myTodayEntry) {
 } else {
     startGame(todayDateStr, todayPair.startWord, todayPair.endWord, true);
 }
+
+})(); } // end daily-init IIFE
 </script>
 </body>
 </html>
