@@ -27,30 +27,37 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const args = process.argv.slice(2);
 if (args.length === 0 || args[0] === '--help') {
-  console.log('Usage: node scripts/build-data.js <glove-file> [--wordlist <file>] [--out <file>] [--sample <n>]');
+  console.log('Usage: node scripts/build-data.js <glove-file> [--wordlist <file>] [--top <n>] [--out <file>] [--sample <n>]');
+  console.log('  --top <n>      Take the top N alphabetic words by GloVe frequency (no wordlist needed)');
   process.exit(0);
 }
-
-const gloveFile  = resolve(args[0]);
-const wordlistFile = argVal('--wordlist') ?? resolve(__dirname, 'data/wordlist.txt');
-const outFile      = argVal('--out')      ?? resolve(__dirname, '../data/embeddings.bin');
-const sampleSize   = argVal('--sample') ? parseInt(argVal('--sample'), 10) : null;
 
 function argVal(flag) {
   const i = args.indexOf(flag);
   return i !== -1 ? args[i + 1] : null;
 }
 
+const gloveFile    = resolve(args[0]);
+const topN         = argVal('--top')    ? parseInt(argVal('--top'),    10) : null;
+const wordlistFile = argVal('--wordlist') ?? (topN ? null : resolve(__dirname, 'data/wordlist.txt'));
+const outFile      = argVal('--out')    ?? resolve(__dirname, '../data/embeddings.bin');
+const sampleSize   = argVal('--sample') ? parseInt(argVal('--sample'), 10) : null;
+
 // ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
-console.log('Loading word list...');
-const wordlistText = await readFile(wordlistFile, 'utf8');
-const allowedWords = new Set(
-  wordlistText.split('\n').map(l => l.trim().toLowerCase()).filter(Boolean)
-);
-console.log(`  ${allowedWords.size} words in filter list`);
+let allowedWords = null;
+if (wordlistFile) {
+  console.log('Loading word list...');
+  const wordlistText = await readFile(wordlistFile, 'utf8');
+  allowedWords = new Set(
+    wordlistText.split('\n').map(l => l.trim().toLowerCase()).filter(Boolean)
+  );
+  console.log(`  ${allowedWords.size} words in filter list`);
+} else {
+  console.log(`Using top-${topN} mode (alphabetic words ≥ 4 chars, sorted by GloVe frequency)`);
+}
 
 console.log('Parsing GloVe...');
 const words  = [];
@@ -68,7 +75,10 @@ for await (const line of rl) {
   if (firstSpace === -1) continue;
 
   const word = line.slice(0, firstSpace).toLowerCase();
-  if (word.length <= 3 || !allowedWords.has(word)) continue;
+  if (word.length <= 3) continue;
+  if (!/^[a-z]+$/.test(word)) continue;
+  if (allowedWords && !allowedWords.has(word)) continue;
+  if (topN !== null && words.length >= topN) break;
 
   const parts = line.slice(firstSpace + 1).split(' ');
   if (dims === -1) dims = parts.length;

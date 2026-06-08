@@ -54,6 +54,15 @@ function renderSummary(account) {
                                          ? fmtTime(account.multiAvgTime) : "—");
     setText("stat-multi-streak",     account.winStreak);
     setText("stat-multi-cur-streak", account.currentStreak);
+
+    // Daily
+    setText("stat-daily-played",     account.dailyPlayed);
+    setText("stat-daily-streak",     account.dailyStreak);
+    setText("stat-daily-best-streak",account.dailyBestStreak);
+    setText("stat-daily-avg-words",  account.dailyPlayed > 0
+                                         ? account.dailyAvgWords.toFixed(1) : "—");
+    setText("stat-daily-avg-path",   account.dailyPlayed > 0
+                                         ? account.dailyAvgPath.toFixed(1) : "—");
 }
 
 async function renderHistory(uid) {

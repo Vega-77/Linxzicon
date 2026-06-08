@@ -16,23 +16,6 @@ import { saveGameResult } from "./account.js";
 import { requireAuth }    from "./auth.js";
 
 // ============================================================
-// WORD_BANK
-// Curated words guaranteed to exist in the GloVe vocabulary.
-// Pairs are chosen at random; trivial pairs (words already
-// similar enough to connect directly) are skipped.
-// ============================================================
-const WORD_BANK = [
-    "ocean", "forest", "music", "castle", "diamond",
-    "dragon", "thunder", "garden", "mirror", "shadow",
-    "silver", "golden", "winter", "summer", "river",
-    "mountain", "desert", "island", "flame", "storm",
-    "crystal", "cloud", "ancient", "sword", "kingdom",
-    "tiger", "eagle", "wolf", "whale", "falcon",
-    "piano", "violin", "guitar", "canvas", "marble",
-    "captain", "voyage", "jungle", "prairie", "glacier"
-];
-
-// ============================================================
 // GameSession
 // One round of gameplay. Used directly for solo mode.
 // MultiplayerSession in multiplayer.js wraps this class.
@@ -65,7 +48,7 @@ export class GameSession {
     // Returns { startWord, endWord } so the UI can display them.
     // ----------------------------------------------------------
     init() {
-        const [w1, w2] = pickStartPair();
+        const [w1, w2] = pickDistantPair();
         return this._setup(w1, w2);
     }
 
@@ -125,7 +108,7 @@ export class GameSession {
         const { state: newState, result } = this.engine.addWord(this.boardState, word);
 
         if (!result.accepted) {
-            if (result.reason === 'unknown_word')    return { error: `"${word}" is not in the vocabulary.` };
+            if (result.reason === 'unknown_word')     return { error: `"${word}" is not in the vocabulary.` };
             if (result.reason === 'already_on_board') return { error: `"${word}" is already on the board.` };
         }
 
@@ -167,26 +150,46 @@ export class GameSession {
 }
 
 // ============================================================
-// pickStartPair
-// Returns two distinct words from WORD_BANK that are not
-// already too similar (avoids trivially easy starting pairs).
+// pickDistantPair
+// Samples the full 200k vocabulary to find the most semantically
+// distant non-trivial pair each game — words far apart enough
+// to be challenging but still positively related (similarity ≥ 0.05)
+// so a connecting path exists through the word network.
 // ============================================================
-function pickStartPair() {
+function pickDistantPair() {
     const engine = getEngine();
-    for (let attempt = 0; attempt < 20; attempt++) {
-        const [w1, w2] = pickTwoDistinct(WORD_BANK);
-        if (!engine) return [w1, w2];
-        const info = engine.pairSimilarity(w1, w2);
-        if (info && !info.isTrivial) return [w1, w2];
-    }
-    return pickTwoDistinct(WORD_BANK);
-}
+    if (!engine) return ["ocean", "forest"];
 
-function pickTwoDistinct(arr) {
-    const i = Math.floor(Math.random() * arr.length);
-    let   j = Math.floor(Math.random() * (arr.length - 1));
-    if (j >= i) j++;
-    return [arr[i], arr[j]];
+    // Sample 30 random words; find the pair with lowest similarity
+    // that is non-trivial (not already directly connectable).
+    // Retry up to 3 times in case the sample is unlucky.
+    for (let attempt = 0; attempt < 3; attempt++) {
+        const pool = engine.randomWords(30);
+        let bestPair = null, bestSim = Infinity;
+
+        for (let i = 0; i < pool.length; i++) {
+            for (let j = i + 1; j < pool.length; j++) {
+                const info = engine.pairSimilarity(pool[i], pool[j]);
+                if (!info || info.isTrivial) continue;
+                if (info.similarity < 0.05) continue; // too disconnected
+                if (info.similarity < bestSim) {
+                    bestSim  = info.similarity;
+                    bestPair = [pool[i], pool[j]];
+                }
+            }
+        }
+        if (bestPair) return bestPair;
+    }
+
+    // Fallback: any non-trivial pair
+    const pool = engine.randomWords(20);
+    for (let i = 0; i < pool.length; i++) {
+        for (let j = i + 1; j < pool.length; j++) {
+            const info = engine.pairSimilarity(pool[i], pool[j]);
+            if (info && !info.isTrivial) return [pool[i], pool[j]];
+        }
+    }
+    return engine.randomWords(2);
 }
 
 // ============================================================
@@ -195,5 +198,5 @@ function pickTwoDistinct(arr) {
 // start/end pair and write it to Firebase for both players.
 // ============================================================
 export function pickStartEnd() {
-    return pickStartPair();
+    return pickDistantPair();
 }
