@@ -1,17 +1,21 @@
 import { database } from "./firebase-config.js";
 import {
     ref, set, get, update, push,
-    onValue, remove, serverTimestamp, runTransaction
+    onValue, remove, serverTimestamp, runTransaction, onDisconnect
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
 import { requireAuth }    from "./auth.js";
 import { loadAccount }    from "./account.js";
 import { pickStartEnd }   from "./game.js";
 import { saveGameResult } from "./account.js";
 
+const QUEUE_STALE_MS = 90_000; // skip queue entries older than 90 s
+
 export class MultiplayerSession {
     constructor(renderer, gameSession,
                 onMatchFound, onOpponentWord, onGameOver, onMessage,
-                onRematchRequested) {
+                onRematchRequested,
+                onHintGranted,   // (word, connectedTo) => void
+                onSkipGranted) { // () => void — optional; onMatchFound re-fires anyway
         this.renderer           = renderer;
         this.gameSession        = gameSession;
         this.onMatchFound       = onMatchFound;
@@ -19,6 +23,8 @@ export class MultiplayerSession {
         this.onGameOver         = onGameOver;
         this.onMessage          = onMessage;
         this.onRematchRequested = onRematchRequested ?? null;
+        this.onHintGranted      = onHintGranted      ?? null;
+        this.onSkipGranted      = onSkipGranted      ?? null;
 
         this.gameId           = null;
         this.myUid            = null;
@@ -32,11 +38,15 @@ export class MultiplayerSession {
         this._gameOverFired   = false;
         this._rematchStarted  = false;
         this._rematchNotified = false;
+        this._hintGranted     = false;
+        this._hintDelivered   = false;
+        this._skipGranted     = false;
 
         this._unsubGame      = null;
         this._unsubQueue     = null;
         this._unsubQueueScan = null;
         this._unsubRematch   = null;
+        this._disconnectRef  = null;
     }
 
     // ----------------------------------------------------------
@@ -79,10 +89,17 @@ export class MultiplayerSession {
         }
 
         let bestKey = null, bestEntry = null, bestDiff = Infinity;
+        const now = Date.now();
 
         if (snap.exists()) {
             for (const [key, entry] of Object.entries(snap.val())) {
                 if (entry.uid === this.myUid) continue;
+
+                // Skip entries that are too old (player likely navigated away)
+                if (entry.joinedAtMs && (now - entry.joinedAtMs) > QUEUE_STALE_MS) {
+                    await remove(ref(database, `queue/${key}`)).catch(() => {});
+                    continue;
+                }
 
                 if (entry.gameId) {
                     try {
@@ -130,11 +147,12 @@ export class MultiplayerSession {
         // No opponent — write self and wait
         try {
             await set(ref(database, `queue/${this.myUid}`), {
-                uid:      this.myUid,
-                elo:      this.myElo,
-                username: this.myUsername,
-                joinedAt: serverTimestamp(),
-                gameId:   null
+                uid:        this.myUid,
+                elo:        this.myElo,
+                username:   this.myUsername,
+                joinedAt:   serverTimestamp(),
+                joinedAtMs: Date.now(),
+                gameId:     null
             });
         } catch (err) {
             console.error("[multi] writing to queue FAILED:", err);
@@ -142,7 +160,10 @@ export class MultiplayerSession {
             return;
         }
 
-        this.onMessage("Waiting for opponent… (open a 2nd tab at the same URL to test)");
+        // Remove queue entry automatically if this client disconnects
+        onDisconnect(ref(database, `queue/${this.myUid}`)).remove().catch(() => {});
+
+        this.onMessage("Waiting for opponent…");
         this._waitForGame();
     }
 
@@ -188,6 +209,13 @@ export class MultiplayerSession {
             this.onMessage("Firebase write error — check DB rules.");
             return;
         }
+
+        // If host disconnects, mark game as abandoned with opponent as winner
+        this._disconnectRef = ref(database, `games/${this.gameId}`);
+        onDisconnect(this._disconnectRef).update({
+            status: 'abandoned',
+            winner: this.opponentUid,
+        }).catch(() => {});
 
         // Signal the guest by writing gameId into their queue slot
         try {
@@ -254,6 +282,13 @@ export class MultiplayerSession {
                 return;
             }
 
+            // If guest disconnects, mark game abandoned with host as winner
+            this._disconnectRef = ref(database, `games/${this.gameId}`);
+            onDisconnect(this._disconnectRef).update({
+                status: 'abandoned',
+                winner: this.opponentUid,
+            }).catch(() => {});
+
             this._initLocalBoard(game.startWord, game.endWord, this.opponentUsername);
             this._listenToGame();
         });
@@ -264,11 +299,13 @@ export class MultiplayerSession {
         this._unsubQueueScan = onValue(ref(database, "queue"), async (snap) => {
             if (!snap.exists() || _hosting) return;
             const entries = snap.val();
+            const now = Date.now();
 
             let bestKey = null, bestEntry = null, bestDiff = Infinity;
             for (const [key, entry] of Object.entries(entries)) {
                 if (entry.uid === this.myUid) continue;
                 if (entry.gameId) continue; // already matched
+                if (entry.joinedAtMs && (now - entry.joinedAtMs) > QUEUE_STALE_MS) continue;
                 const diff = Math.abs((entry.elo ?? 1000) - this.myElo);
                 if (diff < bestDiff) { bestDiff = diff; bestKey = key; bestEntry = entry; }
             }
@@ -313,7 +350,7 @@ export class MultiplayerSession {
     _listenToGame() {
         const seenOpponentWords = new Set();
 
-        this._unsubGame = onValue(ref(database, `games/${this.gameId}`), (snap) => {
+        this._unsubGame = onValue(ref(database, `games/${this.gameId}`), async (snap) => {
             if (!snap.exists()) { console.warn("[multi] game doc gone"); return; }
             const game         = snap.val();
             const opponentData = game.players?.[this.opponentUid];
@@ -330,6 +367,16 @@ export class MultiplayerSession {
                 }
             }
 
+            // Abandon detection (opponent closed tab / lost connection)
+            if (game.status === 'abandoned' && !this._gameOverFired) {
+                this._gameOverFired = true;
+                const iWon = game.winner === this.myUid;
+                this.finished = true;
+                this._cancelDisconnect();
+                this.onGameOver({ won: iWon, opponentElo: this.opponentElo, myElo: this.myElo, abandoned: true });
+                return;
+            }
+
             // Game-over detection — use _gameOverFired so winner (who set finished=true
             // in submitWord before Firebase echoed back) still gets this block exactly once
             if (game.status === "finished" && !this._gameOverFired) {
@@ -340,12 +387,42 @@ export class MultiplayerSession {
                 // only fire here for the loser
                 if (!this.finished) {
                     this.finished = true;
+                    this._cancelDisconnect();
                     this.onGameOver({ won: iWon, opponentElo: this.opponentElo, myElo: this.myElo });
                 }
             }
 
+            // Hint detection — both players requested a hint
+            if (!this._hintDelivered && !this.finished) {
+                const h = game.hint ?? {};
+                if (h[this.myUid] && h[this.opponentUid]) {
+                    if (!this._hintGranted) {
+                        this._hintGranted = true;
+                        if (this.myUid < this.opponentUid) {
+                            // Host: compute and write hint word (guest picks it up on next event)
+                            this._computeAndWriteHint(game);
+                        }
+                    }
+                    // Deliver once hintWord is present (works for both host and guest)
+                    if (game.hintWord) {
+                        this._hintDelivered = true;
+                        this.onHintGranted?.(game.hintWord.word, game.hintWord.connectedTo);
+                    }
+                }
+            }
+
+            // Skip-pair detection — both players requested a skip
+            if (!this._skipGranted && !this.finished) {
+                const sp = game.skipPair ?? {};
+                if (sp[this.myUid] && sp[this.opponentUid]) {
+                    this._skipGranted = true;
+                    this.onSkipGranted?.();
+                    this._startRematch();
+                }
+            }
+
             // Rematch detection — keep listening after game ends
-            if (game.status === "finished") {
+            if (game.status === "finished" || game.status === "abandoned") {
                 const r = game.rematch ?? {};
                 if (r[this.myUid] && r[this.opponentUid] && !this._rematchStarted) {
                     this._rematchStarted = true;
@@ -356,6 +433,45 @@ export class MultiplayerSession {
                 }
             }
         });
+    }
+
+    // ----------------------------------------------------------
+    // _computeAndWriteHint  (host only)
+    // ----------------------------------------------------------
+    _computeAndWriteHint(game) {
+        const engine = this.gameSession.engine;
+        const state  = this.gameSession.boardState;
+        if (!engine || !state) return;
+
+        const { startWord, endWord } = game;
+
+        // Find endpoints with no connections yet
+        const isolated = [startWord, endWord].filter(w => {
+            const idx = state.words.indexOf(w);
+            return idx >= 0 && !state.edges.some(([i, j]) => i === idx || j === idx);
+        });
+
+        const target = isolated[0] ?? startWord;
+        const pool   = engine.randomWords(500, 20000);
+        const hint   = pool.find(w =>
+            !state.words.includes(w) &&
+            engine.pairSimilarity(w, target)?.isTrivial
+        );
+
+        if (hint) {
+            set(ref(database, `games/${this.gameId}/hintWord`),
+                { word: hint, connectedTo: target }).catch(() => {});
+        }
+    }
+
+    // ----------------------------------------------------------
+    // _cancelDisconnect — cancel pending onDisconnect handler
+    // ----------------------------------------------------------
+    _cancelDisconnect() {
+        if (this._disconnectRef) {
+            onDisconnect(this._disconnectRef).cancel().catch(() => {});
+            this._disconnectRef = null;
+        }
     }
 
     // ----------------------------------------------------------
@@ -385,6 +501,7 @@ export class MultiplayerSession {
 
         if (result.won) {
             this.finished = true;
+            this._cancelDisconnect();
             // Show the winner's overlay immediately without waiting for Firebase round-trip
             this.onGameOver({ won: true, opponentElo: this.opponentElo, myElo: this.myElo });
             {
@@ -403,6 +520,9 @@ export class MultiplayerSession {
                 }
                 if (!done) console.error("[multi] failed to mark game finished — opponent may not see game over");
             }
+            const winPath = this.gameSession.engine
+                ? this.gameSession.engine.shortestPath(this.gameSession.boardState)
+                : null;
             await saveGameResult(
                 this.myUid, true,
                 this.gameSession.wordsAdded,
@@ -416,6 +536,8 @@ export class MultiplayerSession {
                     wordsList:        [...(this.gameSession.wordsList ?? [])],
                     opponentUid:      this.opponentUid      ?? "",
                     opponentUsername: this.opponentUsername ?? "",
+                    actualPath:       winPath ?? [],
+                    bestPathLength:   winPath ? winPath.length : 0,
                 }
             );
         }
@@ -432,6 +554,30 @@ export class MultiplayerSession {
             await set(ref(database, `games/${this.gameId}/rematch/${this.myUid}`), true);
         } catch (err) {
             console.error("[multi] requestRematch FAILED:", err);
+        }
+    }
+
+    // ----------------------------------------------------------
+    // requestHint
+    // ----------------------------------------------------------
+    async requestHint() {
+        if (!this.gameId || this._hintGranted) return;
+        try {
+            await set(ref(database, `games/${this.gameId}/hint/${this.myUid}`), true);
+        } catch (err) {
+            console.error("[multi] requestHint FAILED:", err);
+        }
+    }
+
+    // ----------------------------------------------------------
+    // requestSkipPair
+    // ----------------------------------------------------------
+    async requestSkipPair() {
+        if (!this.gameId || this._skipGranted) return;
+        try {
+            await set(ref(database, `games/${this.gameId}/skipPair/${this.myUid}`), true);
+        } catch (err) {
+            console.error("[multi] requestSkipPair FAILED:", err);
         }
     }
 
@@ -460,7 +606,11 @@ export class MultiplayerSession {
         this._gameOverFired   = false;
         this._rematchStarted  = false;
         this._rematchNotified = false;
+        this._hintGranted     = false;
+        this._hintDelivered   = false;
+        this._skipGranted     = false;
         this.finished         = false;
+
 
         const isHost = this.myUid < this.opponentUid;
 
@@ -489,6 +639,14 @@ export class MultiplayerSession {
                         }
                     }
                 });
+
+                // Re-register disconnect handler for new game
+                this._disconnectRef = ref(database, `games/${this.gameId}`);
+                onDisconnect(this._disconnectRef).update({
+                    status: 'abandoned',
+                    winner: this.opponentUid,
+                }).catch(() => {});
+
                 // Write new game ID to old game doc so guest can find it
                 await update(ref(database, `games/${oldGameId}`), { rematchGameId: this.gameId });
             } catch (err) {
@@ -514,6 +672,14 @@ export class MultiplayerSession {
                         return;
                     }
                     const g = gs.val();
+
+                    // Re-register disconnect handler for new game
+                    this._disconnectRef = ref(database, `games/${this.gameId}`);
+                    onDisconnect(this._disconnectRef).update({
+                        status: 'abandoned',
+                        winner: this.opponentUid,
+                    }).catch(() => {});
+
                     this._initLocalBoard(g.startWord, g.endWord, this.opponentUsername);
                     this._listenToGame();
                 } catch (err) {
@@ -537,5 +703,6 @@ export class MultiplayerSession {
         if (this._unsubQueue)     { this._unsubQueue();     this._unsubQueue     = null; }
         if (this._unsubQueueScan) { this._unsubQueueScan(); this._unsubQueueScan = null; }
         if (this._unsubRematch)   { this._unsubRematch();   this._unsubRematch   = null; }
+        this._cancelDisconnect();
     }
 }
