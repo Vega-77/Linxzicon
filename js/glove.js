@@ -9,7 +9,7 @@ import { LinxiconEngine } from '../game/src/engine.js';
 
 let _engine = null;
 
-export async function loadGlove(filepath = 'game/data/embeddings.bin') {
+export async function loadGlove(filepath = 'game/data/embeddings.bin', onProgress) {
     if (_engine) {
         return;
     }
@@ -26,7 +26,7 @@ export async function loadGlove(filepath = 'game/data/embeddings.bin') {
     }
 
     try {
-        const emb = await loadEmbeddings(filepath);
+        const emb = await loadEmbeddings(filepath, onProgress);
 
         if (!emb || emb.size === 0) {
             throw new Error("Embeddings map is empty — the .bin file may be corrupt or wrong format");
@@ -39,6 +39,10 @@ export async function loadGlove(filepath = 'game/data/embeddings.bin') {
         console.error("[glove] loadEmbeddings failed:", err);
         throw err;
     }
+}
+
+export function isEmbeddingsLoaded() {
+    return _engine !== null;
 }
 
 export function getEngine() {

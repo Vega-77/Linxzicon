@@ -111,12 +111,16 @@
 </div>
 
 <script type="module">
-    import { requireAuth, logout }  from "./js/auth.js";
-    import { loadAccount }          from "./js/account.js";
+    import { requireAuth, logout }   from "./js/auth.js";
+    import { loadAccount }           from "./js/account.js";
+    import { initDownloadManager }   from "./js/download-manager.js";
 
     // Redirect to login if not signed in
     const user    = await requireAuth();
     const account = await loadAccount(user.uid);
+
+    // Kick off embeddings download (or show consent modal) in the background
+    initDownloadManager();
 
     if (account) {
         document.getElementById("welcome-name").textContent = account.username;

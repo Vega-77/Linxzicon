@@ -358,8 +358,10 @@
 </div>
 
 <script type="module">
-    import { requireAuth }          from "./js/auth.js";
-    import { loadGlove, getEngine } from "./js/glove.js";
+    import { requireAuth }                    from "./js/auth.js";
+    import { getEngine }                      from "./js/glove.js";
+    import { initDownloadManager,
+             awaitEmbeddings }                from "./js/download-manager.js";
     import { Graph }                from "./js/graph.js";
     import { Renderer }             from "./js/render.js";
     import { GameSession }          from "./js/game.js";
@@ -375,17 +377,23 @@
     // ── Auth guard ──
     await requireAuth();
 
-    // ── Show loading screen while embeddings download ──
+    // ── Show loading screen and await embeddings ──
     document.getElementById("matchmaking-screen").classList.add("active");
-    document.getElementById("matchmaking-msg").textContent = "Loading vocabulary…";
+    document.getElementById("matchmaking-msg").textContent = "Preparing word engine…";
+    initDownloadManager();
 
-    // ── Load embeddings ──
     try {
-        await loadGlove("game/data/embeddings.bin");
+        await awaitEmbeddings();
     } catch (err) {
-        document.getElementById("matchmaking-msg").textContent =
-            "Failed to load embeddings — is game/data/embeddings.bin present?";
-        console.error("[game.html] loadGlove failed:", err);
+        if (err?.message === 'embeddings-declined') {
+            document.getElementById("matchmaking-msg").textContent =
+                "Download required to play — refresh and accept the download prompt.";
+        } else {
+            document.getElementById("matchmaking-msg").textContent =
+                "Failed to load word engine — is game/data/embeddings.bin present?";
+            console.error("[game.html] awaitEmbeddings failed:", err);
+        }
+        return;
     }
 
     // Hide the panel that doesn't apply to this mode

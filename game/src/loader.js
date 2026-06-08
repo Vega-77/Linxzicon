@@ -3,7 +3,8 @@ const IS_NODE = typeof globalThis.window === 'undefined';
 // Bump this string whenever embeddings.bin is rebuilt so the old cache is ignored.
 const EMBEDDINGS_CACHE = 'linxicon-embeddings-v3';
 
-async function readBuffer(source) {
+// onProgress: ({ loaded: number, total: number }) => void  — optional
+async function readBuffer(source, onProgress) {
   if (IS_NODE) {
     const { readFile } = await import('node:fs/promises');
     const buf = await readFile(source);
@@ -15,33 +16,57 @@ async function readBuffer(source) {
     try {
       const cache = await caches.open(EMBEDDINGS_CACHE);
       const cached = await cache.match(source);
-      if (cached) return cached.arrayBuffer();
+      if (cached) {
+        const ab = await cached.arrayBuffer();
+        onProgress?.({ loaded: ab.byteLength, total: ab.byteLength });
+        return ab;
+      }
     } catch (_) {}
   }
 
-  // Download from network
+  // Download from network with streaming progress
   const res = await fetch(source);
   if (!res.ok) throw new Error(`Failed to fetch ${source}: ${res.status}`);
 
-  // Store a clone for next time (fire-and-forget; don't block the parse)
+  const total = parseInt(res.headers.get('Content-Length') || '0', 10);
+  let loaded = 0;
+  const chunks = [];
+
+  const reader = res.body.getReader();
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    loaded += value.byteLength;
+    onProgress?.({ loaded, total: total || loaded });
+  }
+
+  // Reassemble into a single ArrayBuffer
+  const combined = new Uint8Array(loaded);
+  let pos = 0;
+  for (const chunk of chunks) { combined.set(chunk, pos); pos += chunk.byteLength; }
+  const buffer = combined.buffer;
+
+  // Store in cache (reconstruct Response so we don't need to clone a consumed body)
   if ('caches' in globalThis) {
     try {
       const cache = await caches.open(EMBEDDINGS_CACHE);
-      cache.put(source, res.clone()).catch(() => {});
+      cache.put(source, new Response(buffer.slice(0), { headers: res.headers })).catch(() => {});
     } catch (_) {}
   }
 
-  return res.arrayBuffer();
+  return buffer;
 }
 
 /**
  * Loads a LINX binary embeddings file.
  * Returns Map<string, { vec: Float32Array, mean: number, std: number }>
  *
- * source: file path (Node.js) or URL (browser)
+ * source:      file path (Node.js) or URL (browser)
+ * onProgress:  optional ({ loaded, total }) callback for download progress
  */
-export async function loadEmbeddings(source) {
-  const buffer = await readBuffer(source);
+export async function loadEmbeddings(source, onProgress) {
+  const buffer = await readBuffer(source, onProgress);
   const view = new DataView(buffer);
 
   const magic = String.fromCharCode(

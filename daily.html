@@ -215,7 +215,9 @@
 
 <script type="module">
 import { requireAuth }                    from "./js/auth.js";
-import { loadGlove, getEngine }           from "./js/glove.js";
+import { getEngine }                       from "./js/glove.js";
+import { initDownloadManager,
+         awaitEmbeddings }                 from "./js/download-manager.js";
 import { Graph }                          from "./js/graph.js";
 import { Renderer }                       from "./js/render.js";
 import { GameSession }                    from "./js/game.js";
@@ -569,13 +571,19 @@ window.addEventListener("beforeunload", () => {
 // ──────────────────────────── Init ──────────────────────────
 setScreen("loading-screen");
 
+initDownloadManager();
 try {
-    document.getElementById("loading-msg").textContent = "Loading embeddings…";
-    await loadGlove("game/data/embeddings.bin");
+    document.getElementById("loading-msg").textContent = "Preparing word engine…";
+    await awaitEmbeddings();
 } catch (err) {
-    document.getElementById("loading-msg").textContent =
-        "Failed to load embeddings. Is game/data/embeddings.bin present?";
-    console.error("[daily] loadGlove failed:", err);
+    if (err?.message === 'embeddings-declined') {
+        document.getElementById("loading-msg").textContent =
+            "Download required to play — refresh and accept the download prompt.";
+    } else {
+        document.getElementById("loading-msg").textContent =
+            "Failed to load word engine. Is game/data/embeddings.bin present?";
+        console.error("[daily] awaitEmbeddings failed:", err);
+    }
 }
 
 user    = await requireAuth();

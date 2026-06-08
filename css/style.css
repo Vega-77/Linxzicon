@@ -273,6 +273,76 @@ canvas {
 .win-overlay h2 { font-size: 2rem; color: var(--green); }
 .win-overlay p  { color: var(--text-muted); }
 
+/* ── Download manager ────────────────────────────────────── */
+.dl-consent-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.85);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10000;
+    animation: fadeIn 0.2s ease;
+    backdrop-filter: blur(4px);
+}
+.dl-consent-overlay--hide {
+    animation: fadeIn 0.25s ease reverse forwards;
+}
+.dl-consent-card {
+    background: var(--bg2);
+    border: 1px solid var(--bg3);
+    border-radius: var(--radius);
+    padding: 36px 32px;
+    max-width: 420px;
+    width: 90%;
+    text-align: center;
+    animation: scalePop 0.25s ease;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+}
+.dl-consent-icon   { font-size: 2.6rem; margin-bottom: 12px; }
+.dl-consent-title  { margin: 0 0 12px; font-size: 1.25rem; }
+.dl-consent-body   { color: var(--text-muted); font-size: 0.9rem; line-height: 1.6; margin-bottom: 24px; }
+.dl-consent-accept { width: 100%; margin-bottom: 10px; }
+.dl-consent-skip   { width: 100%; font-size: 0.85rem; }
+
+.dl-progress-bar {
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    background: var(--bg2);
+    border-top: 1px solid var(--bg3);
+    padding: 10px 16px 12px;
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    animation: slideUp 0.2s ease;
+}
+.dl-progress-track {
+    flex: 1;
+    height: 6px;
+    background: var(--bg3);
+    border-radius: 3px;
+    overflow: hidden;
+}
+.dl-progress-fill {
+    height: 100%;
+    width: 0%;
+    background: var(--accent);
+    border-radius: 3px;
+    transition: width 0.3s ease;
+}
+.dl-progress-bar--done   .dl-progress-fill { background: var(--green); }
+.dl-progress-bar--error  .dl-progress-fill { background: var(--red); }
+.dl-progress-label {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    white-space: nowrap;
+    min-width: 240px;
+    text-align: right;
+}
+@keyframes dlFadeOut { to { opacity: 0; transform: translateY(100%); } }
+.dl-progress-bar--fade { animation: dlFadeOut 0.5s ease forwards; }
+
 /* --- Responsive tweaks --- */
 @media (max-width: 600px) {
     .stats-grid { grid-template-columns: repeat(2, 1fr); }
