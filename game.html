@@ -539,7 +539,7 @@
         const oppCanvas   = document.getElementById("opp-canvas");
         const oppGraph    = new Graph();
         const oppRenderer = new Renderer(oppCanvas, oppGraph);
-        oppRenderer.hideLabels = true;
+        oppRenderer.hideLabels = false;
 
         let oppBoardState = null;
         let oppWordCount  = 0;
@@ -662,7 +662,10 @@
                     const engine = getEngine();
                     const path   = engine.shortestPath(oppBoardState);
                     if (path) oppRenderer.setWinningPath(path);
-                    await gameSession.saveResult(false, opponentElo);
+                    await gameSession.saveResult(false, opponentElo, {
+                        opponentUid:      multiSession.opponentUid      ?? "",
+                        opponentUsername: multiSession.opponentUsername ?? "",
+                    });
                 }
 
                 showMultiResults(won, eloChange, gameSession.wordsAdded, gameSession.getElapsed());

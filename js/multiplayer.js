@@ -362,7 +362,16 @@ export class MultiplayerSession {
                 this.myUid, true,
                 this.gameSession.wordsAdded,
                 this.gameSession.getElapsed(),
-                this.opponentElo
+                this.opponentElo,
+                "multiplayer",
+                {
+                    startWord:        this.gameSession.startWord        ?? "",
+                    endWord:          this.gameSession.endWord          ?? "",
+                    totalGraphWords:  this.gameSession.graph ? this.gameSession.graph.wordCount : this.gameSession.wordsAdded,
+                    wordsList:        [...(this.gameSession.wordsList ?? [])],
+                    opponentUid:      this.opponentUid      ?? "",
+                    opponentUsername: this.opponentUsername ?? "",
+                }
             );
         }
 

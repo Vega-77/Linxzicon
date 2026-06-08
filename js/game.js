@@ -39,6 +39,7 @@ export class GameSession {
         this._startTime = null;
         this.wordsAdded = 0;
         this.finished   = false;
+        this.wordsList  = []; // tracks accepted words in chronological order
     }
 
     // ----------------------------------------------------------
@@ -70,6 +71,7 @@ export class GameSession {
         this.graph      = new Graph();
         this.finished   = false;
         this.wordsAdded = 0;
+        this.wordsList  = [];
         this._startTime = Date.now();
 
         this.startWord  = startWord;
@@ -118,10 +120,12 @@ export class GameSession {
         const connections = result.newEdges.map(([a, b]) => a === word ? b : a);
         this.graph.addNode(word, connections);
         this.wordsAdded++;
+        this.wordsList.push(word);
 
         if (result.won) {
             this.finished = true;
-            this.renderer.setWinningPath(this.engine.shortestPath(newState));
+            const winPath = this.engine.shortestPath(newState);
+            this.renderer.setWinningPath(winPath);
             this.onWin(this.wordsAdded, this.getElapsed());
         }
 
@@ -130,13 +134,29 @@ export class GameSession {
 
     // ----------------------------------------------------------
     // saveResult
-    // Writes the game outcome to Firebase.
+    // Writes the game outcome to Firebase with rich analytics data.
     // opponentElo should be passed for multiplayer; null for solo.
     // ----------------------------------------------------------
-    async saveResult(won, opponentElo = null) {
+    async saveResult(won, opponentElo = null, extraOverrides = {}) {
         const user = await requireAuth();
         if (!user) return;
-        await saveGameResult(user.uid, won, this.wordsAdded, this.getElapsed(), opponentElo);
+
+        const engine    = this.engine;
+        const newState  = this.boardState;
+        const winPath   = engine ? engine.shortestPath(newState) : null;
+
+        const extraData = {
+            startWord:        this.startWord        ?? "",
+            endWord:          this.endWord          ?? "",
+            totalGraphWords:  this.graph ? this.graph.wordCount : this.wordsAdded,
+            bestPathLength:   winPath ? winPath.length : 0,
+            actualPath:       winPath ?? [],
+            wordsList:        [...this.wordsList],
+            ...extraOverrides,
+        };
+
+        const mode = opponentElo === null ? "solo" : "multiplayer";
+        await saveGameResult(user.uid, won, this.wordsAdded, this.getElapsed(), opponentElo, mode, extraData);
     }
 
     // ----------------------------------------------------------
