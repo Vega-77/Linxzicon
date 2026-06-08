@@ -22,7 +22,7 @@
             flex: 1;
             padding: 10px 14px;
             gap: 8px;
-            min-height: 0; /* critical for nested flex shrink */
+            min-height: 0;
         }
 
         /* ── Info bar ── */
@@ -98,8 +98,8 @@
             font-size: 0.8rem;
         }
 
-        /* ── Canvas wrapper — fills remaining vertical space ── */
-        .canvas-wrapper {
+        /* ── Solo: single canvas ── */
+        #solo-board {
             position: relative;
             flex: 1;
             min-height: 0;
@@ -107,26 +107,64 @@
             overflow: hidden;
             border: 1px solid var(--bg3);
         }
-        /* Canvas fills wrapper completely via absolute positioning */
-        #game-canvas {
+        #solo-board canvas {
             position: absolute;
             top: 0; left: 0;
-            width: 100%;
-            height: 100%;
+            width: 100%; height: 100%;
             display: block;
         }
 
-        /* ── Win overlay ── */
+        /* ── Multiplayer: two boards side by side ── */
+        #boards-container {
+            display: none;
+            flex: 1;
+            gap: 8px;
+            min-height: 0;
+        }
+        #boards-container.active { display: flex; }
+
+        .board-panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+            border: 1px solid var(--bg3);
+            border-radius: var(--radius);
+            overflow: hidden;
+        }
+        .board-label {
+            background: var(--bg2);
+            border-bottom: 1px solid var(--bg3);
+            padding: 6px 12px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-align: center;
+            flex-shrink: 0;
+        }
+        .board-canvas-wrapper {
+            position: relative;
+            flex: 1;
+            min-height: 0;
+        }
+        .board-canvas-wrapper canvas {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            display: block;
+        }
+
+        /* ── Win overlay — absolute over entire #game-screen ── */
         .win-overlay {
             position: absolute;
             inset: 0;
+            z-index: 50;
             background: rgba(15,23,42,0.88);
             flex-direction: column;
             align-items: center;
             justify-content: center;
             gap: 18px;
-            border-radius: var(--radius);
-            display: none; /* shown via .visible class */
+            display: none;
         }
         .win-overlay.visible { display: flex; }
         .win-overlay h2 { font-size: 2.2rem; color: var(--green); }
@@ -145,6 +183,26 @@
             padding: 12px 16px;
         }
         .word-input-row .btn { padding: 12px 24px; font-size: 1rem; }
+
+        /* ── Results bar (multiplayer end state) ── */
+        #results-bar {
+            background: var(--bg2);
+            border: 1px solid var(--bg3);
+            border-radius: var(--radius);
+            padding: 16px 24px;
+            display: none;
+            align-items: center;
+            gap: 20px;
+            flex-shrink: 0;
+            flex-wrap: wrap;
+        }
+        #results-bar.visible { display: flex; }
+        #results-verdict { font-size: 1.4rem; font-weight: 800; }
+        #results-verdict.victory { color: var(--green); }
+        #results-verdict.defeat  { color: var(--red); }
+        #results-elo { font-size: 1.1rem; font-weight: 700; }
+        .elo-gain { color: var(--green); }
+        .elo-loss { color: var(--red); }
 
         /* ── Status message ── */
         #status-msg {
@@ -178,12 +236,13 @@
         .match-card h2 { margin-bottom: 8px; }
         .match-card p  { color: var(--text-muted); margin-bottom: 28px; }
 
-        /* ── Game screen hidden by default ── */
+        /* ── Game screen ── */
         #game-screen {
             display: none;
             flex: 1;
             flex-direction: column;
             min-height: 0;
+            position: relative; /* win overlay anchors here */
         }
         #game-screen.active {
             display: flex;
@@ -236,22 +295,40 @@
             </span>
         </div>
 
-        <!-- Canvas + win overlay -->
-        <div class="canvas-wrapper">
+        <!-- Solo: single canvas -->
+        <div id="solo-board">
             <canvas id="game-canvas"></canvas>
+        </div>
 
-            <div class="win-overlay" id="win-overlay">
-                <h2 id="win-title">You connected them! 🎉</h2>
-                <p  id="win-details"></p>
-                <div class="win-btn-row">
-                    <button class="btn btn-success" id="play-again-btn">Play Again</button>
-                    <button class="btn btn-ghost"   id="go-lobby-btn">Lobby</button>
+        <!-- Multiplayer: two boards side by side -->
+        <div id="boards-container">
+            <div class="board-panel">
+                <div class="board-label">You</div>
+                <div class="board-canvas-wrapper">
+                    <canvas id="my-canvas"></canvas>
+                </div>
+            </div>
+            <div class="board-panel">
+                <div class="board-label" id="opp-board-label">Opponent</div>
+                <div class="board-canvas-wrapper">
+                    <canvas id="opp-canvas"></canvas>
                 </div>
             </div>
         </div>
 
+        <!-- Results bar (multiplayer end state) -->
+        <div id="results-bar">
+            <div id="results-verdict"></div>
+            <div id="results-elo"></div>
+            <div id="results-stats"></div>
+            <div class="win-btn-row">
+                <button class="btn btn-primary" id="rematch-btn">Rematch</button>
+                <button class="btn btn-ghost"   id="go-lobby-btn-multi">Lobby</button>
+            </div>
+        </div>
+
         <!-- Word input -->
-        <div class="word-input-row">
+        <div class="word-input-row" id="word-input-row">
             <input type="text" id="word-input"
                    placeholder="Type a connecting word and press Enter…"
                    autocomplete="off" autocorrect="off" spellcheck="false" />
@@ -262,15 +339,26 @@
         <div id="status-msg"></div>
 
     </div>
+
+    <!-- Win overlay floats over the whole game screen -->
+    <div class="win-overlay" id="win-overlay">
+        <h2 id="win-title">You connected them! 🎉</h2>
+        <p  id="win-details"></p>
+        <div class="win-btn-row">
+            <button class="btn btn-success" id="play-again-btn">Play Again</button>
+            <button class="btn btn-ghost"   id="go-lobby-btn">Lobby</button>
+        </div>
+    </div>
 </div>
 
 <script type="module">
-    import { requireAuth }        from "./js/auth.js";
-    import { loadGlove }          from "./js/glove.js";
-    import { Graph }              from "./js/graph.js";
-    import { Renderer }           from "./js/render.js";
-    import { GameSession }        from "./js/game.js";
-    import { MultiplayerSession } from "./js/multiplayer.js";
+    import { requireAuth }          from "./js/auth.js";
+    import { loadGlove, getEngine } from "./js/glove.js";
+    import { Graph }                from "./js/graph.js";
+    import { Renderer }             from "./js/render.js";
+    import { GameSession }          from "./js/game.js";
+    import { MultiplayerSession }   from "./js/multiplayer.js";
+    import { calcEloDelta }         from "./js/account.js";
 
     // ── Mode from URL ──
     const params = new URLSearchParams(window.location.search);
@@ -289,30 +377,36 @@
             "Failed to load embeddings — is game/data/embeddings.bin present?";
         document.getElementById("status-msg").className = "error";
         console.error("[game.html] loadGlove failed:", err);
-        // Don't return — show the error and let the page stay up for debugging
     }
 
-    // ── Canvas setup ──
-    // The canvas is absolutely positioned inside .canvas-wrapper.
-    // We set its pixel dimensions to match the wrapper AFTER layout,
-    // then keep them in sync on resize.
-    const canvas  = document.getElementById("game-canvas");
-    const wrapper = canvas.parentElement;
+    // Hide the panel that doesn't apply to this mode
+    if (mode === "solo") {
+        document.getElementById("boards-container").style.display = "none";
+    } else {
+        document.getElementById("solo-board").style.display = "none";
+    }
 
+    // ── Canvas sync ──
     function syncCanvasSize() {
-        const w = wrapper.clientWidth;
-        const h = wrapper.clientHeight;
-        if (w > 0 && h > 0 && (canvas.width !== w || canvas.height !== h)) {
-            canvas.width  = w;
-            canvas.height = h;
-            console.log("[game.html] canvas resized to", w, "x", h);
+        if (mode === "solo") {
+            const c = document.getElementById("game-canvas");
+            const w = c.parentElement.clientWidth;
+            const h = c.parentElement.clientHeight;
+            if (w > 0 && h > 0 && (c.width !== w || c.height !== h)) {
+                c.width = w; c.height = h;
+            }
+        } else {
+            for (const id of ["my-canvas", "opp-canvas"]) {
+                const c = document.getElementById(id);
+                const w = c.parentElement.clientWidth;
+                const h = c.parentElement.clientHeight;
+                if (w > 0 && h > 0 && (c.width !== w || c.height !== h)) {
+                    c.width = w; c.height = h;
+                }
+            }
         }
     }
-
-    // ── Graph + renderer ──
-    const graph    = new Graph();
-    const renderer = new Renderer(canvas, graph);
-    window.addEventListener("resize", () => { syncCanvasSize(); });
+    window.addEventListener("resize", syncCanvasSize);
 
     // ── UI helpers ──
     function setStatus(text, type = "") {
@@ -354,10 +448,10 @@
     function showGameScreen() {
         document.getElementById("matchmaking-screen").classList.remove("active");
         document.getElementById("game-screen").classList.add("active");
-        // Sync canvas size now that the wrapper is visible and has layout
-        requestAnimationFrame(() => {
-            syncCanvasSize();
-        });
+        if (mode !== "solo") {
+            document.getElementById("boards-container").classList.add("active");
+        }
+        requestAnimationFrame(syncCanvasSize);
     }
 
     // ── Word submission (shared by both modes) ──
@@ -396,6 +490,9 @@
     // SOLO MODE
     // ══════════════════════════════════════════════
     if (mode === "solo") {
+        const canvas   = document.getElementById("game-canvas");
+        const renderer = new Renderer(canvas, new Graph());
+
         showGameScreen();
 
         gameSession = new GameSession(
@@ -412,6 +509,11 @@
 
         activeSubmit = (w) => gameSession.submitWord(w);
 
+        window.addEventListener("beforeunload", () => {
+            renderer.stop();
+            stopTimer();
+        });
+
         const { startWord, endWord } = gameSession.init();
         document.getElementById("start-word-tag").textContent = startWord;
         document.getElementById("end-word-tag").textContent   = endWord;
@@ -423,53 +525,142 @@
     } else {
         document.getElementById("matchmaking-screen").classList.add("active");
 
+        // ── My board (managed by GameSession) ──
+        const myCanvas   = document.getElementById("my-canvas");
+        const myRenderer = new Renderer(myCanvas, new Graph());
+
+        // ── Opponent board (managed manually with hidden labels) ──
+        const oppCanvas   = document.getElementById("opp-canvas");
+        const oppGraph    = new Graph();
+        const oppRenderer = new Renderer(oppCanvas, oppGraph);
+        oppRenderer.hideLabels = false;
+
+        let oppBoardState = null;
+        const oppWordMap  = new Map(); // actual word → node key in oppGraph
+        let oppWordCount  = 0;
+
         // GameSession onWin is a no-op — MultiplayerSession drives the win flow
         gameSession = new GameSession(
-            canvas, renderer,
+            myCanvas, myRenderer,
             () => {},
             (msg) => setStatus(msg, "info")
         );
 
+        let rematchClicked = false;
+
+        function showMultiResults(won, eloChange, wordsUsed, solveTime) {
+            stopTimer();
+            document.getElementById("word-input-row").style.display = "none";
+            const bar = document.getElementById("results-bar");
+            bar.classList.add("visible");
+
+            const verdict = document.getElementById("results-verdict");
+            verdict.textContent = won ? "Victory" : "Defeat";
+            verdict.className   = won ? "victory"  : "defeat";
+
+            const eloEl  = document.getElementById("results-elo");
+            const sign   = eloChange >= 0 ? "+" : "";
+            const cls    = eloChange >= 0 ? "elo-gain" : "elo-loss";
+            eloEl.innerHTML = `<span class="${cls}">${sign}${eloChange} ELO</span>`;
+
+            document.getElementById("results-stats").textContent =
+                `${wordsUsed} word${wordsUsed !== 1 ? "s" : ""} · ${fmtTime(solveTime)}`;
+        }
+
         const multiSession = new MultiplayerSession(
-            renderer,
+            myRenderer,
             gameSession,
 
-            // onMatchFound
+            // onMatchFound — _initLocalBoard already called gameSession.initWords()
             ({ startWord, endWord, opponentName }) => {
-                showGameScreen();
-                document.getElementById("start-word-tag").textContent = startWord;
-                document.getElementById("end-word-tag").textContent   = endWord;
+                const sw = startWord.toLowerCase();
+                const ew = endWord.toLowerCase();
+
+                // Reset results bar from any previous round
+                document.getElementById("results-bar").classList.remove("visible");
+                document.getElementById("word-input-row").style.display = "";
+                rematchClicked = false;
+                const rBtn = document.getElementById("rematch-btn");
+                rBtn.textContent = "Rematch";
+                rBtn.disabled    = false;
+
+                // Initialise opponent board state and graph
+                const engine = getEngine();
+                oppBoardState = engine.createGame(sw, ew);
+                oppWordMap.clear();
+                oppWordMap.set(sw, sw);
+                oppWordMap.set(ew, ew);
+                oppWordCount = 0;
+                oppGraph.nodes.clear();
+                oppGraph.addNode(sw, []);
+                oppGraph.addNode(ew, []);
+                oppRenderer.setStartEnd(sw, ew);
+                oppRenderer.setWinningPath(null);
+                oppRenderer.start();
+
+                // Update UI
+                document.getElementById("start-word-tag").textContent = sw;
+                document.getElementById("end-word-tag").textContent   = ew;
                 document.getElementById("opponent-bar").classList.add("visible");
                 document.getElementById("opponent-name").textContent  = opponentName;
+                document.getElementById("opp-board-label").textContent = opponentName;
+
+                showGameScreen();
                 refreshWordCount();
                 startTimer();
-                setStatus(`Connect "${startWord}" → "${endWord}"`);
+                setStatus(`Connect "${sw}" → "${ew}"`);
             },
 
-            // onOpponentWord
+            // onOpponentWord — apply to opponent's board and graph
             (word) => {
-                const el = document.getElementById("opponent-word-count");
-                el.textContent = parseInt(el.textContent || "0") + 1;
-                setStatus(`Opponent added: "${word}"`, "info");
+                if (!oppBoardState) return;
+                const engine = getEngine();
+                const { state: newState, result } = engine.addWord(oppBoardState, word);
+                if (!result.accepted) return;
+
+                oppBoardState = newState;
+                oppWordCount++;
+                const nodeKey = `opp_${oppWordCount}`;
+                oppWordMap.set(word, nodeKey);
+
+                const connectedKeys = result.newEdges
+                    .map(([a, b]) => a === word ? b : a)
+                    .map(w => oppWordMap.get(w))
+                    .filter(Boolean);
+
+                oppGraph.addNode(nodeKey, connectedKeys);
+
+                document.getElementById("opponent-word-count").textContent = oppWordCount;
+                setStatus("Opponent played a word", "info");
             },
 
             // onGameOver
-            async ({ won, opponentElo }) => {
-                if (won) {
-                    showOverlay(
-                        "You connected them! 🎉",
-                        `${gameSession.wordsAdded} word${gameSession.wordsAdded !== 1 ? "s" : ""} · ${fmtTime(gameSession.getElapsed())}`
-                    );
-                    // Win already saved in multiSession.submitWord
-                } else {
-                    showOverlay("Opponent won 😔", "Better luck next time!");
+            async ({ won, opponentElo, myElo }) => {
+                const eloChange = calcEloDelta(myElo, opponentElo, won);
+
+                if (!won && oppBoardState) {
+                    const engine = getEngine();
+                    const path   = engine.shortestPath(oppBoardState);
+                    if (path) {
+                        const displayPath = path.map(w => oppWordMap.get(w) ?? w);
+                        oppRenderer.setWinningPath(displayPath);
+                    }
                     await gameSession.saveResult(false, opponentElo);
                 }
+
+                showMultiResults(won, eloChange, gameSession.wordsAdded, gameSession.getElapsed());
             },
 
             // onMessage (matchmaking status)
             (msg) => {
                 document.getElementById("matchmaking-msg").textContent = msg;
+            },
+
+            // onRematchRequested — opponent clicked Rematch first
+            () => {
+                const btn = document.getElementById("rematch-btn");
+                btn.textContent = "Accept Rematch";
+                btn.disabled    = false;
             }
         );
 
@@ -482,7 +673,25 @@
                 window.location.href = "lobby.html";
             });
 
-        window.addEventListener("beforeunload", () => multiSession.cleanup());
+        document.getElementById("rematch-btn")
+            .addEventListener("click", async () => {
+                if (rematchClicked) return;
+                rematchClicked = true;
+                const btn = document.getElementById("rematch-btn");
+                btn.textContent = "Waiting…";
+                btn.disabled    = true;
+                await multiSession.requestRematch();
+            });
+
+        document.getElementById("go-lobby-btn-multi")
+            .addEventListener("click", () => { window.location.href = "lobby.html"; });
+
+        window.addEventListener("beforeunload", () => {
+            multiSession.cleanup();
+            myRenderer.stop();
+            oppRenderer.stop();
+            stopTimer();
+        });
     }
 
     // ── Navigation ──

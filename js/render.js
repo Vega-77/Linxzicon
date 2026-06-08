@@ -2,11 +2,11 @@
 // render.js — with debug logging to diagnose invisible nodes
 // ============================================================
 
-const REPULSION = 12000;
+const REPULSION = 50000;
 const SPRING    = 0.06;
-const REST_LEN  = 180;
-const DAMPING   = 0.82;
-const GRAVITY   = 0.012;
+const REST_LEN  = 200;
+const DAMPING   = 0.85;
+const GRAVITY   = 0.008;
 const TIME_STEP = 0.5;
 
 const NODE_RADIUS  = 30;
@@ -30,6 +30,7 @@ export class Renderer {
         this.startWord   = null;
         this.endWord     = null;
         this.winningPath = null;
+        this.hideLabels  = false;
         this._running    = false;
         this._animFrame  = null;
         this._dragging   = null;
@@ -216,11 +217,15 @@ export class Renderer {
                 ctx.stroke();
             }
 
+            const label = (this.hideLabels &&
+                           node.word !== this.startWord &&
+                           node.word !== this.endWord)
+                ? "?" : node.word;
             ctx.fillStyle    = COL_TEXT;
-            ctx.font         = `bold ${node.word.length > 8 ? 10 : 12}px sans-serif`;
+            ctx.font         = `bold ${label.length > 8 ? 10 : 12}px sans-serif`;
             ctx.textAlign    = "center";
             ctx.textBaseline = "middle";
-            ctx.fillText(node.word, node.x, node.y);
+            ctx.fillText(label, node.x, node.y);
 
             if (isTarget) {
                 ctx.fillStyle  = "rgba(245,158,11,0.8)";

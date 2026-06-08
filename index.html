@@ -79,9 +79,13 @@
 <script type="module">
     import { login, register, onAuthChange } from "./js/auth.js";
 
+    // Registering flag prevents onAuthChange from redirecting mid-registration,
+    // which would abandon the createAccount DB write before it completes.
+    let registering = false;
+
     // If already logged in, skip straight to lobby
     onAuthChange((user) => {
-        if (user) window.location.href = "lobby.html";
+        if (user && !registering) window.location.href = "lobby.html";
     });
 
     // Toggle between login and register forms
@@ -132,11 +136,13 @@
 
         btn.disabled = true;
         btn.textContent = "Creating account…";
+        registering = true;
 
         try {
             await register(username, email, password);
             window.location.href = "lobby.html";
         } catch (err) {
+            registering = false;
             showMsg("register-msg", friendlyError(err.message), "error");
             btn.disabled = false;
             btn.textContent = "Create Account";
