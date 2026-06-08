@@ -109,7 +109,7 @@ async function renderHistory(uid, account) {
         tr.innerHTML = `
             <td style="white-space:nowrap">${fmtDate(e.date)}</td>
             <td><span class="mode-badge ${modeClass}">${modeName}</span></td>
-            <td class="${e.won ? "result-win" : (isSolo ? "" : "result-loss")}">${e.won ? "Win ✓" : "Loss"}</td>
+            <td class="${e.won ? "result-win" : (isSolo ? "" : "result-loss")}">${e.won ? "Win" : "Loss"}</td>
             <td>${e.wordsUsed > 0 ? e.wordsUsed : "—"}</td>
             <td style="font-size:0.8rem; font-weight:500; white-space:nowrap">${startW} ➔ ${endW}</td>
             <td style="font-size:0.75rem; color:var(--text-muted); max-width:160px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${pathString}">${pathString}</td>
