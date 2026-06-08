@@ -1,15 +1,37 @@
 const IS_NODE = typeof globalThis.window === 'undefined';
 
+// Bump this string whenever embeddings.bin is rebuilt so the old cache is ignored.
+const EMBEDDINGS_CACHE = 'linxicon-embeddings-v3';
+
 async function readBuffer(source) {
   if (IS_NODE) {
     const { readFile } = await import('node:fs/promises');
     const buf = await readFile(source);
     return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
-  } else {
-    const res = await fetch(source);
-    if (!res.ok) throw new Error(`Failed to fetch ${source}: ${res.status}`);
-    return res.arrayBuffer();
   }
+
+  // Try the Cache API first (persists across sessions)
+  if ('caches' in globalThis) {
+    try {
+      const cache = await caches.open(EMBEDDINGS_CACHE);
+      const cached = await cache.match(source);
+      if (cached) return cached.arrayBuffer();
+    } catch (_) {}
+  }
+
+  // Download from network
+  const res = await fetch(source);
+  if (!res.ok) throw new Error(`Failed to fetch ${source}: ${res.status}`);
+
+  // Store a clone for next time (fire-and-forget; don't block the parse)
+  if ('caches' in globalThis) {
+    try {
+      const cache = await caches.open(EMBEDDINGS_CACHE);
+      cache.put(source, res.clone()).catch(() => {});
+    } catch (_) {}
+  }
+
+  return res.arrayBuffer();
 }
 
 /**

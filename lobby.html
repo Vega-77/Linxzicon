@@ -52,6 +52,15 @@
             font-weight: 600;
             margin-top: 8px;
         }
+
+        /* entrance animations */
+        h2       { animation: fadeInDown 0.3s ease both; }
+        .elo-badge { animation: fadeIn 0.4s ease 0.1s both; }
+        .lobby-card { animation: slideUp 0.3s ease both; }
+        .lobby-card:nth-child(1) { animation-delay: 0.05s; }
+        .lobby-card:nth-child(2) { animation-delay: 0.15s; }
+        .lobby-card:nth-child(3) { animation-delay: 0.25s; }
+        .lobby-card:nth-child(4) { animation-delay: 0.35s; }
     </style>
 </head>
 <body>
@@ -92,6 +101,12 @@
             <p>View your performance and match history.</p>
         </div>
 
+        <div class="lobby-card" id="btn-daily">
+            <div class="icon">📅</div>
+            <h3>Daily</h3>
+            <p>One shared puzzle for everyone today. Climb the leaderboard.</p>
+        </div>
+
     </div>
 </div>
 
@@ -119,6 +134,10 @@
 
     document.getElementById("btn-stats").addEventListener("click", () => {
         window.location.href = "stats.html";
+    });
+
+    document.getElementById("btn-daily").addEventListener("click", () => {
+        window.location.href = "daily.html";
     });
 
     document.getElementById("logout-btn").addEventListener("click", async () => {
