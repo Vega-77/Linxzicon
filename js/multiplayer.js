@@ -217,16 +217,28 @@ export class MultiplayerSession {
             winner: this.opponentUid,
         }).catch(() => {});
 
-        // Signal the guest by writing gameId into their queue slot
-        try {
-            await set(ref(database, `queue/${opponent.uid}`), {
+        // Signal the guest by writing gameId into their queue slot (retry up to 3x)
+        {
+            const guestNotif = {
                 uid:      opponent.uid,
                 elo:      this.opponentElo,
                 username: opponentUsername,
                 gameId:   this.gameId
-            });
-        } catch (err) {
-            console.error("[multi] notifying guest FAILED:", err);
+            };
+            let notified = false;
+            for (let i = 0; i < 3; i++) {
+                try {
+                    await set(ref(database, `queue/${opponent.uid}`), guestNotif);
+                    notified = true;
+                    break;
+                } catch (err) {
+                    console.error(`[multi] notifying guest attempt ${i + 1} FAILED:`, err);
+                    if (i < 2) await new Promise(r => setTimeout(r, 500 * (i + 1)));
+                }
+            }
+            if (!notified) {
+                console.error("[multi] could not notify guest after 3 attempts");
+            }
         }
 
         this._initLocalBoard(startWord, endWord, opponentUsername);
@@ -296,43 +308,55 @@ export class MultiplayerSession {
         // Secondary: scan the whole queue so we can claim a waiting peer and
         // become the host — handles the race where both players arrived at the
         // same time and both entered the waiting state before either could match.
+        //
+        // Tiebreaker: only claim opponents with a LARGER UID.
+        // This guarantees that if A and B arrive simultaneously, only the one
+        // with the smaller UID can ever claim the other — preventing both from
+        // simultaneously claiming each other and creating two games.
+        let _scanning = false;
         this._unsubQueueScan = onValue(ref(database, "queue"), async (snap) => {
-            if (!snap.exists() || _hosting) return;
-            const entries = snap.val();
-            const now = Date.now();
-
-            let bestKey = null, bestEntry = null, bestDiff = Infinity;
-            for (const [key, entry] of Object.entries(entries)) {
-                if (entry.uid === this.myUid) continue;
-                if (entry.gameId) continue; // already matched
-                if (entry.joinedAtMs && (now - entry.joinedAtMs) > QUEUE_STALE_MS) continue;
-                const diff = Math.abs((entry.elo ?? 1000) - this.myElo);
-                if (diff < bestDiff) { bestDiff = diff; bestKey = key; bestEntry = entry; }
-            }
-
-            if (!bestKey) return;
-
-            // Try to atomically claim the slot
-            let committed = false;
+            if (!snap.exists() || _hosting || _scanning) return;
+            _scanning = true;
             try {
-                const result = await runTransaction(ref(database, `queue/${bestKey}`), (current) => {
-                    if (!current || current.gameId) return; // abort — taken
-                    return null; // claim by deleting
-                });
-                committed = result.committed;
-            } catch (_) {}
+                const entries = snap.val();
+                const now = Date.now();
 
-            if (!committed) return;
+                let bestKey = null, bestEntry = null, bestDiff = Infinity;
+                for (const [key, entry] of Object.entries(entries)) {
+                    if (entry.uid === this.myUid) continue;
+                    if (entry.gameId) continue; // already matched
+                    if (entry.uid < this.myUid) continue; // tiebreaker: defer to smaller UID
+                    if (entry.joinedAtMs && (now - entry.joinedAtMs) > QUEUE_STALE_MS) continue;
+                    const diff = Math.abs((entry.elo ?? 1000) - this.myElo);
+                    if (diff < bestDiff) { bestDiff = diff; bestKey = key; bestEntry = entry; }
+                }
 
-            _hosting = true;
-            if (this._unsubQueue)     { this._unsubQueue();     this._unsubQueue     = null; }
-            if (this._unsubQueueScan) { this._unsubQueueScan(); this._unsubQueueScan = null; }
+                if (!bestKey) return;
 
-            // Remove ourselves from the queue before creating the game
-            try { await remove(myQueueRef); } catch (_) {}
+                // Try to atomically claim the slot
+                let committed = false;
+                try {
+                    const result = await runTransaction(ref(database, `queue/${bestKey}`), (current) => {
+                        if (!current || current.gameId) return; // abort — taken
+                        return null; // claim by deleting
+                    });
+                    committed = result.committed;
+                } catch (_) {}
 
-            console.log("[multi] waitForGame: claimed waiting peer, becoming host");
-            await this._createGame(this._myAccount, bestEntry);
+                if (!committed) return;
+
+                _hosting = true;
+                if (this._unsubQueue)     { this._unsubQueue();     this._unsubQueue     = null; }
+                if (this._unsubQueueScan) { this._unsubQueueScan(); this._unsubQueueScan = null; }
+
+                // Remove ourselves from the queue before creating the game
+                try { await remove(myQueueRef); } catch (_) {}
+
+                console.log("[multi] waitForGame: claimed waiting peer, becoming host");
+                await this._createGame(this._myAccount, bestEntry);
+            } finally {
+                _scanning = false;
+            }
         });
     }
 

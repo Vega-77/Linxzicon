@@ -760,6 +760,9 @@
 
                 const eloChange = calcEloDelta(myElo, opponentElo, won);
 
+                // Reveal opponent's word labels now that the game is over
+                oppRenderer.hideLabels = false;
+
                 if (!won) {
                     const engine = getEngine();
                     const path   = engine.shortestPath(oppBoardState);
