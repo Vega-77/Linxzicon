@@ -375,13 +375,16 @@
     // ── Auth guard ──
     await requireAuth();
 
+    // ── Show loading screen while embeddings download ──
+    document.getElementById("matchmaking-screen").classList.add("active");
+    document.getElementById("matchmaking-msg").textContent = "Loading vocabulary…";
+
     // ── Load embeddings ──
     try {
         await loadGlove("game/data/embeddings.bin");
     } catch (err) {
-        document.getElementById("status-msg").textContent =
+        document.getElementById("matchmaking-msg").textContent =
             "Failed to load embeddings — is game/data/embeddings.bin present?";
-        document.getElementById("status-msg").className = "error";
         console.error("[game.html] loadGlove failed:", err);
     }
 
