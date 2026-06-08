@@ -1,6 +1,6 @@
 // ============================================================
-// js/stats.js — Fully Colored Axes and Labels Edition
-// Includes drawn axes, colored text overlays, and colorful math summaries.
+// stats.js
+// Includes rich match history table and advanced analytics charts.
 // ============================================================
 
 import { database } from "./firebase-config.js";
@@ -38,13 +38,20 @@ function renderSummary(account) {
     setText("stat-multi-played",     account.multiPlayed);
     setText("stat-multi-won",        account.multiWon);
     setText("stat-multi-lost",       account.multiLost);
-    
+
     const multiRate = account.multiPlayed > 0 ? ((account.multiWon / account.multiPlayed) * 100).toFixed(1) + "%" : "—";
     setText("stat-multi-winrate",    multiRate);
     setText("stat-multi-avg-words",  account.multiAvgWords > 0 ? account.multiAvgWords.toFixed(1) : "—");
     setText("stat-multi-avg-time",   account.multiAvgTime > 0  ? fmtTime(account.multiAvgTime)  : "—");
     setText("stat-multi-streak",     account.multiBestStreak);
-    setText("stat-multi-cur-streak",  account.multiCurStreak);
+    setText("stat-multi-cur-streak", account.multiCurStreak);
+
+    // Daily Mode Cards
+    setText("stat-daily-played",      account.dailyPlayed);
+    setText("stat-daily-streak",      account.dailyStreak);
+    setText("stat-daily-best-streak", account.dailyBestStreak);
+    setText("stat-daily-avg-words",   account.dailyPlayed > 0 ? account.dailyAvgWords.toFixed(1) : "—");
+    setText("stat-daily-avg-path",    account.dailyPlayed > 0 ? account.dailyAvgPath.toFixed(1)  : "—");
 }
 
 async function renderHistory(uid, account) {
@@ -92,15 +99,17 @@ async function renderHistory(uid, account) {
         const isSolo = e.mode === "solo" || !e.mode;
         tr.className = e.won ? "row-win" : (isSolo ? "" : "row-loss");
 
-        const modeName = e.mode === "multiplayer" ? "Multi" : (e.mode === "daily" ? "Daily" : "Solo");
+        const modeName  = e.mode === "multiplayer" ? "Multi" : (e.mode === "daily" ? "Daily" : "Solo");
         const modeClass = e.mode === "multiplayer" ? "mode-multiplayer" : (e.mode === "daily" ? "mode-daily" : "mode-solo");
-        
+
         const startW = e.startWord ?? "—";
-        const endW = e.endWord ?? "—";
+        const endW   = e.endWord   ?? "—";
         const opponentDisp = e.opponentUsername ?? (e.opponentElo ? `Elo ${e.opponentElo}` : "—");
-        
+
         let pathString = "—";
-        if (e.path && Array.isArray(e.path)) {
+        if (e.actualPath && Array.isArray(e.actualPath) && e.actualPath.length > 0) {
+            pathString = e.actualPath.join(" ➔ ");
+        } else if (e.path && Array.isArray(e.path)) {
             pathString = e.path.join(" ➔ ");
         } else if (e.bestPathLength) {
             pathString = `[${e.bestPathLength} hops]`;
@@ -128,72 +137,61 @@ async function renderHistory(uid, account) {
 function processAdvancedAnalytics(entries, account) {
     const chronoEntries = [...entries].reverse();
     const colors = {
-        indigo: "#818cf8", // lightened for dark mode contrast
-        amber: "#fbbf24",
-        emerald: "#34d399",
-        rose: "#fb7185",
-        textMuted: "#94a3b8"
+        indigo:   "#818cf8",
+        amber:    "#fbbf24",
+        emerald:  "#34d399",
+        rose:     "#fb7185",
+        textMuted: "#94a3b8",
     };
 
     const initCanvas = (id) => {
         const canvas = document.getElementById(id);
         if (!canvas) return null;
-        const ctx = canvas.getContext("2d");
-        const dpr = window.devicePixelRatio || 1;
+        const ctx  = canvas.getContext("2d");
+        const dpr  = window.devicePixelRatio || 1;
         const rect = canvas.parentElement.getBoundingClientRect();
-        canvas.width = rect.width * dpr;
+        canvas.width  = rect.width  * dpr;
         canvas.height = rect.height * dpr;
         ctx.scale(dpr, dpr);
         return { ctx, w: rect.width, h: rect.height };
     };
 
-    // Helper: Draws labeled X and Y axes on the canvas
     const drawAxes = (ctx, w, h, xLabel, yLabel, labelColor) => {
-        const padX = 40;
-        const padY = 30;
-
-        // Axis Lines
+        const padX = 40, padY = 30;
         ctx.strokeStyle = "rgba(255,255,255,0.2)";
         ctx.lineWidth = 1;
         ctx.beginPath();
-        ctx.moveTo(padX, 10); ctx.lineTo(padX, h - padY); // Y Axis
-        ctx.moveTo(padX, h - padY); ctx.lineTo(w - 10, h - padY); // X Axis
+        ctx.moveTo(padX, 10); ctx.lineTo(padX, h - padY);
+        ctx.moveTo(padX, h - padY); ctx.lineTo(w - 10, h - padY);
         ctx.stroke();
-
-        // X Axis Label
         ctx.fillStyle = labelColor || colors.textMuted;
         ctx.font = "bold 10px sans-serif";
         ctx.textAlign = "center";
         ctx.fillText(xLabel, padX + (w - padX) / 2, h - 8);
-
-        // Y Axis Label (Rotated)
         ctx.save();
         ctx.translate(12, 10 + (h - padY) / 2);
         ctx.rotate(-Math.PI / 2);
         ctx.textAlign = "center";
         ctx.fillText(yLabel, 0, 0);
         ctx.restore();
-
-        ctx.textAlign = "left"; // Reset alignment
+        ctx.textAlign = "left";
         return { padX, padY };
     };
 
-    // --- FEATURE 1: Elo History ---
+    // Elo History
     (() => {
         const c = initCanvas("canvas-elo-history");
         if (!c) return;
-        
-        const eloHistory = chronoEntries.filter(e => e.mode === "multiplayer" && e.eloAtTime !== undefined).map(e => e.eloAtTime);
+        const eloHistory = chronoEntries
+            .filter(e => e.mode === "multiplayer" && e.eloAtTime !== undefined)
+            .map(e => e.eloAtTime);
         if (eloHistory.length === 0) eloHistory.push(account.elo);
         if (eloHistory.length === 1) eloHistory.unshift(1000);
-
         const { padX, padY } = drawAxes(c.ctx, c.w, c.h, "Matches (Oldest → Newest)", "Elo Rating", colors.indigo);
-
         const min = Math.min(...eloHistory) - 30;
         const max = Math.max(...eloHistory) + 30;
         const range = max - min || 60;
         const stepX = (c.w - padX - 15) / Math.max(eloHistory.length - 1, 1);
-
         c.ctx.strokeStyle = colors.indigo;
         c.ctx.lineWidth = 2.5;
         c.ctx.beginPath();
@@ -201,8 +199,6 @@ function processAdvancedAnalytics(entries, account) {
             const x = padX + 5 + i * stepX;
             const y = c.h - padY - ((val - min) / range) * (c.h - padY - 20);
             if (i === 0) c.ctx.moveTo(x, y); else c.ctx.lineTo(x, y);
-            
-            // Draw numeric Elo labels directly on the points occasionally
             if (i === 0 || i === eloHistory.length - 1) {
                 c.ctx.fillStyle = colors.indigo;
                 c.ctx.font = "bold 9px sans-serif";
@@ -210,27 +206,22 @@ function processAdvancedAnalytics(entries, account) {
             }
         });
         c.ctx.stroke();
-
         const summaryEl = document.getElementById("summary-elo-history");
         if (summaryEl) summaryEl.innerHTML = `Tracked <span style="color:${colors.indigo}; font-weight:bold">${eloHistory.length}</span> records. Ending rating: <span style="color:${colors.indigo}; font-weight:bold">${eloHistory[eloHistory.length - 1]}</span>`;
     })();
 
-    // --- FEATURE 2: Words vs Path Length Scatter ---
+    // Words vs Path Length Scatter
     (() => {
         const c = initCanvas("canvas-scatter-words");
         if (!c) return;
-        
         const points = chronoEntries.map(e => ({
             x: e.wordsUsed || 0,
-            y: e.bestPathLength || (e.path ? e.path.length : (e.won ? Math.round((e.wordsUsed || 1) * 0.5) : 0))
+            y: e.bestPathLength || (e.actualPath ? e.actualPath.length : (e.path ? e.path.length : 0)),
         })).filter(p => p.x > 0 && p.y > 0);
-
         const { padX, padY } = drawAxes(c.ctx, c.w, c.h, "Total Words Played", "Best Path Length", colors.amber);
-
         if (points.length === 0) return;
         const maxX = Math.max(...points.map(p => p.x), 10) + 4;
         const maxY = Math.max(...points.map(p => p.y), 6) + 2;
-
         c.ctx.fillStyle = colors.amber;
         points.forEach(p => {
             const cx = padX + 5 + (p.x / maxX) * (c.w - padX - 20);
@@ -241,79 +232,66 @@ function processAdvancedAnalytics(entries, account) {
         });
     })();
 
-    // --- FEATURE 3 & 4: Word Deployment Totals ---
+    // Word Deployment Totals
     (() => {
         let totalWords = 0;
         const frequencyMap = {};
-        
         chronoEntries.forEach(e => {
             totalWords += (e.wordsUsed || 0);
-            if (e.path && Array.isArray(e.path)) {
-                e.path.forEach(w => {
+            const path = e.actualPath ?? e.path ?? [];
+            if (Array.isArray(path)) {
+                path.forEach(w => {
                     const clean = w.toLowerCase().trim();
                     if (clean) frequencyMap[clean] = (frequencyMap[clean] || 0) + 1;
                 });
             }
         });
-
         const totalEl = document.getElementById("stat-total-words-used");
         if (totalEl) totalEl.textContent = totalWords;
-
-        const wordsSorted = Object.entries(frequencyMap).sort((a,b) => b[1] - a[1]).slice(0, 5);
+        const wordsSorted = Object.entries(frequencyMap).sort((a, b) => b[1] - a[1]).slice(0, 5);
         const mostUsedContainer = document.getElementById("container-most-used-words");
         if (mostUsedContainer) {
-            if (wordsSorted.length === 0) {
-                mostUsedContainer.innerHTML = "<span style='color:var(--text-muted); font-size:0.8rem;'>No path word arrays logged yet</span>";
-            } else {
-                mostUsedContainer.innerHTML = wordsSorted.map(item => `
-                    <span class="word-list-tag">${item[0]} <strong style="color:var(--amber)">(${item[1]})</strong></span>
-                `).join("");
-            }
+            mostUsedContainer.innerHTML = wordsSorted.length === 0
+                ? "<span style='color:var(--text-muted); font-size:0.8rem;'>No path data yet</span>"
+                : wordsSorted.map(([w, n]) => `<span class="word-list-tag">${w} <strong style="color:var(--amber)">(${n})</strong></span>`).join("");
         }
     })();
 
-    // --- FEATURE 5: Distribution Histogram ---
+    // Path Length Distribution
     (() => {
         const c = initCanvas("canvas-path-dist");
         if (!c) return;
-        
-        const lengths = chronoEntries.map(e => e.bestPathLength || (e.path ? e.path.length : 0)).filter(l => l > 0);
+        const lengths = chronoEntries
+            .map(e => e.bestPathLength || (e.actualPath ? e.actualPath.length : (e.path ? e.path.length : 0)))
+            .filter(l => l > 0);
         const { padX, padY } = drawAxes(c.ctx, c.w, c.h, "Path Length (Hops)", "Games Count", colors.emerald);
-
         if (lengths.length === 0) return;
-
-        const meanVal = lengths.reduce((a,b)=>a+b,0) / lengths.length;
-        const sorted = [...lengths].sort((a,b)=>a-b);
-        const mid = Math.floor(sorted.length / 2);
+        const meanVal   = lengths.reduce((a, b) => a + b, 0) / lengths.length;
+        const sorted    = [...lengths].sort((a, b) => a - b);
+        const mid       = Math.floor(sorted.length / 2);
         const medianVal = sorted.length % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
-        const variance = lengths.reduce((a,b) => a + Math.pow(b - meanVal, 2), 0) / lengths.length;
+        const variance  = lengths.reduce((a, b) => a + Math.pow(b - meanVal, 2), 0) / lengths.length;
         const stdDevVal = Math.sqrt(variance);
-
         const sumEl = document.getElementById("summary-path-dist");
         if (sumEl) sumEl.innerHTML = `Mean: <span style="color:${colors.emerald}; font-weight:bold">${meanVal.toFixed(1)}</span> | Median: <span style="color:${colors.emerald}; font-weight:bold">${medianVal}</span> | Std Dev: <span style="color:${colors.emerald}; font-weight:bold">${stdDevVal.toFixed(1)}</span>`;
-
         const buckets = new Array(9).fill(0);
         lengths.forEach(l => { if (l < 9) buckets[l]++; else buckets[8]++; });
         const maxBucket = Math.max(...buckets, 1);
         const barW = (c.w - padX - 10) / 8;
-
         for (let i = 1; i <= 8; i++) {
             const barH = (buckets[i] / maxBucket) * (c.h - padY - 20);
             const x = padX + 2 + (i - 1) * barW;
-            
             c.ctx.fillStyle = colors.emerald;
             c.ctx.fillRect(x, c.h - padY - barH, barW - 4, barH);
-            
-            // Draw colored bucket label
             c.ctx.fillStyle = colors.emerald;
             c.ctx.font = "bold 10px sans-serif";
             c.ctx.textAlign = "center";
-            c.ctx.fillText(i === 8 ? "8+" : i, x + (barW - 4)/2, c.h - padY + 14);
+            c.ctx.fillText(i === 8 ? "8+" : i, x + (barW - 4) / 2, c.h - padY + 14);
             c.ctx.textAlign = "left";
         }
     })();
 
-    // --- FEATURE 6: Opponent Win/Loss Matrix ---
+    // Opponent Win/Loss Matrix
     (() => {
         const opponents = {};
         chronoEntries.forEach(e => {
@@ -324,8 +302,7 @@ function processAdvancedAnalytics(entries, account) {
                 if (e.won) opponents[op].wins++; else opponents[op].losses++;
             }
         });
-
-        const topOpponents = Object.values(opponents).sort((a,b) => b.count - a.count).slice(0, 5);
+        const topOpponents = Object.values(opponents).sort((a, b) => b.count - a.count).slice(0, 5);
         const tbody = document.getElementById("tbody-opponent-history");
         if (tbody && topOpponents.length > 0) {
             tbody.innerHTML = topOpponents.map(o => `
@@ -338,56 +315,42 @@ function processAdvancedAnalytics(entries, account) {
         }
     })();
 
-    // --- FEATURE 8: Multiplayer Solve Time Distribution ---
+    // Solve Time Distribution
     (() => {
         const c = initCanvas("canvas-time-dist");
         if (!c) return;
-
-        const onlineTimes = chronoEntries.filter(e => e.mode === "multiplayer" && e.won && e.solveTime > 0).map(e => e.solveTime);
+        const onlineTimes = chronoEntries
+            .filter(e => e.mode === "multiplayer" && e.won && e.solveTime > 0)
+            .map(e => e.solveTime);
         const { padX, padY } = drawAxes(c.ctx, c.w, c.h, "Solve Time (Seconds)", "Games Count", colors.rose);
-
         const n = onlineTimes.length;
         if (n === 0) return;
-
-        const meanVal = onlineTimes.reduce((a,b)=>a+b, 0) / n;
-        const sorted = [...onlineTimes].sort((a,b)=>a-b);
-        
-        const mid = Math.floor(n / 2);
+        const meanVal   = onlineTimes.reduce((a, b) => a + b, 0) / n;
+        const sorted    = [...onlineTimes].sort((a, b) => a - b);
+        const mid       = Math.floor(n / 2);
         const medianVal = n % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
-        
-        const q1 = sorted[Math.floor(n * 0.25)];
-        const q3 = sorted[Math.floor(n * 0.75)];
-        const variance = onlineTimes.reduce((a,b) => a + Math.pow(b - meanVal, 2), 0) / n;
+        const q1        = sorted[Math.floor(n * 0.25)];
+        const q3        = sorted[Math.floor(n * 0.75)];
+        const variance  = onlineTimes.reduce((a, b) => a + Math.pow(b - meanVal, 2), 0) / n;
         const stdDevVal = Math.sqrt(variance);
-
         const sumEl = document.getElementById("summary-time-dist");
         if (sumEl) sumEl.innerHTML = `Mean: <span style="color:${colors.rose}; font-weight:bold">${meanVal.toFixed(1)}s</span> | Med: <span style="color:${colors.rose}; font-weight:bold">${medianVal}s</span> | Q1/Q3: <span style="color:${colors.rose}; font-weight:bold">${q1}s/${q3}s</span> | Std Dev: <span style="color:${colors.rose}; font-weight:bold">${stdDevVal.toFixed(1)}s</span>`;
-
-        const maxTime = Math.max(...onlineTimes, 60);
+        const maxTime  = Math.max(...onlineTimes, 60);
         const binCount = 6;
         const binWidth = maxTime / binCount;
-        const bins = new Array(binCount).fill(0);
-
-        onlineTimes.forEach(t => {
-            const idx = Math.min(Math.floor(t / binWidth), binCount - 1);
-            bins[idx]++;
-        });
-
+        const bins     = new Array(binCount).fill(0);
+        onlineTimes.forEach(t => { bins[Math.min(Math.floor(t / binWidth), binCount - 1)]++; });
         const maxBin = Math.max(...bins, 1);
-        const barW = (c.w - padX - 10) / binCount;
-
+        const barW   = (c.w - padX - 10) / binCount;
         bins.forEach((count, i) => {
             const barH = (count / maxBin) * (c.h - padY - 20);
             const x = padX + 2 + i * barW;
-            
             c.ctx.fillStyle = colors.rose;
             c.ctx.fillRect(x, c.h - padY - barH, barW - 4, barH);
-
-            // Colored X-axis bucket labels
             c.ctx.fillStyle = colors.rose;
             c.ctx.font = "bold 9px sans-serif";
             c.ctx.textAlign = "center";
-            c.ctx.fillText(`${Math.round(i * binWidth)}s`, x + (barW - 4)/2, c.h - padY + 14);
+            c.ctx.fillText(`${Math.round(i * binWidth)}s`, x + (barW - 4) / 2, c.h - padY + 14);
             c.ctx.textAlign = "left";
         });
     })();

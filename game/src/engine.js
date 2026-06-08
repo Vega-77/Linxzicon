@@ -2,13 +2,13 @@
  * LinxiconEngine — pure game logic, no I/O.
  *
  * adaptiveK controls how strict the edge threshold is.
- * Higher K = harder connections. Default raised to 2.0
- * (was 1.0 in the original) so only genuinely close words connect.
+ * Higher K = harder connections. Default raised to 2.5
+ * (was 2.0) so only genuinely close words connect.
  *
  * Threshold formula per edge:
  *   max(mean_A, mean_B) + K * max(std_A, std_B)
  *
- * At K=2.0 only the top ~2% most similar pairs form edges,
+ * At K=2.5 only the top ~0.6% most similar pairs form edges,
  * giving a satisfying but achievable challenge.
  */
 export class LinxiconEngine {
@@ -18,7 +18,7 @@ export class LinxiconEngine {
    */
   constructor(embeddings, options = {}) {
     this._emb      = embeddings;
-    this._defaultK = options.adaptiveK ?? 2.0; // raised from 1.0 → 2.0
+    this._defaultK = options.adaptiveK ?? 2.5; // raised from 2.0 → 2.5
   }
 
   // ---------------------------------------------------------------------------
@@ -29,11 +29,11 @@ export class LinxiconEngine {
     return this._emb.has(word.toLowerCase());
   }
 
-  randomWords(n) {
+  randomWords(n, limit) {
     if (!this._wordList) this._wordList = [...this._emb.keys()];
-    const result = [], len = this._wordList.length;
+    const result = [], cap = Math.min(limit ?? this._wordList.length, this._wordList.length);
     for (let i = 0; i < n; i++)
-      result.push(this._wordList[Math.floor(Math.random() * len)]);
+      result.push(this._wordList[Math.floor(Math.random() * cap)]);
     return result;
   }
 

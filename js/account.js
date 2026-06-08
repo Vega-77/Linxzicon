@@ -1,9 +1,7 @@
-// ============================================================\
-// account.js — updated version
-// Every Firebase read/write logs what it's doing and what
-// it gets back, so we can see exactly where stats break.
-// Includes tracking for rich analytics parameters.
-// ============================================================\
+// ============================================================
+// account.js
+// Firebase account read/write with rich analytics tracking.
+// ============================================================
 
 import { database, auth }              from "./firebase-config.js";
 import { ref, set, get, update, push } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
@@ -29,8 +27,9 @@ export class Account {
         this.multiLost        = d.multiLost        ?? 0;
         this.multiAvgWords    = d.multiAvgWords    ?? 0;
         this.multiAvgTime     = d.multiAvgTime     ?? 0;
-        this.multiBestStreak  = d.multiBestStreak  ?? 0;
-        this.multiCurStreak   = d.multiCurStreak   ?? 0;
+        // Support both old field names (winStreak/currentStreak) and new ones
+        this.multiBestStreak  = d.multiBestStreak  ?? d.winStreak     ?? 0;
+        this.multiCurStreak   = d.multiCurStreak   ?? d.currentStreak ?? 0;
 
         // Daily Mode
         this.dailyPlayed     = d.dailyPlayed     ?? 0;
@@ -64,7 +63,7 @@ export class Account {
             dailyAvgPath:    this.dailyAvgPath,
             dailyStreak:     this.dailyStreak,
             dailyBestStreak: this.dailyBestStreak,
-            dailyLastDate:   this.dailyLastDate
+            dailyLastDate:   this.dailyLastDate,
         };
     }
 }
@@ -91,6 +90,18 @@ export async function loadAccount(uid) {
     try {
         const snap = await get(ref(database, `users/${uid}`));
         if (!snap.exists()) {
+            // Profile missing — registration was interrupted before the DB write completed.
+            const user = auth.currentUser;
+            if (user) {
+                console.warn("[account] loadAccount: no profile found, creating default");
+                const account = new Account({
+                    uid,
+                    username: user.displayName ?? user.email.split("@")[0],
+                    email:    user.email,
+                });
+                await set(ref(database, `users/${uid}`), account.toObject());
+                return account;
+            }
             console.warn(`[account] loadAccount node /users/${uid} does not exist`);
             return null;
         }
@@ -103,41 +114,49 @@ export async function loadAccount(uid) {
     }
 }
 
-/**
- * Enhanced saveGameResult to accept additional telemetry for deep stats dashboard
- */
-export async function saveGameResult(uid, won, wordsUsed, solveTime, opponentElo, mode = "multiplayer", extraData = {}) {
-    console.log(`[account] saveGameResult internal trigger: uid=${uid}, mode=${mode}, won=${won}, words=${wordsUsed}, time=${solveTime}s`);
-    
+// ============================================================
+// saveGameResult
+// opponentElo === null  → solo game
+// opponentElo === number → multiplayer game
+// mode: "solo" | "multiplayer" (inferred from opponentElo if omitted)
+// extraData: optional rich telemetry for the analytics dashboard
+// ============================================================
+export async function saveGameResult(uid, won, wordsUsed, solveTime, opponentElo = null, mode = null, extraData = {}) {
+    const isSolo = opponentElo === null || mode === "solo";
+    const effectiveMode = mode ?? (isSolo ? "solo" : "multiplayer");
+
+    console.log(`[account] saveGameResult uid=${uid} mode=${effectiveMode} won=${won} words=${wordsUsed} time=${solveTime}s`);
+
     const account = await loadAccount(uid);
     if (!account) {
         console.error("[account] saveGameResult failed — could not load player profile");
         return null;
     }
 
-    if (mode === "solo") {
+    if (isSolo) {
         account.soloPlayed++;
         if (won) {
             account.soloWon++;
             const w = account.soloWon;
-            account.soloAvgWords = ((account.soloAvgWords * (w - 1)) + wordsUsed) / w;
-            account.soloAvgTime  = ((account.soloAvgTime  * (w - 1)) + solveTime)  / w;
-            if (account.soloBestTime === 0 || solveTime < account.soloBestTime) {
+            if (wordsUsed > 0)
+                account.soloAvgWords = ((account.soloAvgWords * (w - 1)) + wordsUsed) / w;
+            if (solveTime > 0)
+                account.soloAvgTime  = ((account.soloAvgTime  * (w - 1)) + solveTime)  / w;
+            if (account.soloBestTime === 0 || solveTime < account.soloBestTime)
                 account.soloBestTime = solveTime;
-            }
         }
     } else {
-        // multiplayer
         account.multiPlayed++;
         if (won) {
             account.multiWon++;
             account.multiCurStreak++;
-            if (account.multiCurStreak > account.multiBestStreak) {
+            if (account.multiCurStreak > account.multiBestStreak)
                 account.multiBestStreak = account.multiCurStreak;
-            }
             const w = account.multiWon;
-            account.multiAvgWords = ((account.multiAvgWords * (w - 1)) + wordsUsed) / w;
-            account.multiAvgTime  = ((account.multiAvgTime  * (w - 1)) + solveTime)  / w;
+            if (wordsUsed > 0)
+                account.multiAvgWords = ((account.multiAvgWords * (w - 1)) + wordsUsed) / w;
+            if (solveTime > 0)
+                account.multiAvgTime  = ((account.multiAvgTime  * (w - 1)) + solveTime)  / w;
         } else {
             account.multiLost++;
             account.multiCurStreak = 0;
@@ -146,45 +165,49 @@ export async function saveGameResult(uid, won, wordsUsed, solveTime, opponentElo
         if (opponentElo !== null && opponentElo !== undefined) {
             const oldElo = account.elo;
             account.elo = calcElo(oldElo, opponentElo, won);
-            console.log(`[account] Elo updated from ${oldElo} to ${account.elo} against opponent (${opponentElo})`);
+            console.log(`[account] Elo ${oldElo} → ${account.elo}`);
         }
     }
 
     try {
         await update(ref(database, `users/${uid}`), account.toObject());
-        console.log("[account] profile totals updated successfully");
+        console.log("[account] profile totals updated");
     } catch (err) {
         console.error("[account] profile totals update failed:", err);
     }
 
-    // Push enhanced match history block
+    // Rich history entry for the analytics dashboard
     const historyEntry = {
         date:             new Date().toISOString(),
-        mode,
+        mode:             effectiveMode,
         won,
         wordsUsed,
         solveTime,
         eloAtTime:        account.elo,
-        startWord:        extraData.startWord ?? "",
-        endWord:          extraData.endWord ?? "",
-        totalGraphWords:  extraData.totalGraphWords ?? wordsUsed,
-        bestPathLength:   extraData.bestPathLength ?? 0,
-        actualPath:       extraData.actualPath ?? [],
-        wordsList:        extraData.wordsList ?? [],
-        opponentUid:      extraData.opponentUid ?? "",
-        opponentUsername: extraData.opponentUsername ?? ""
+        startWord:        extraData.startWord        ?? "",
+        endWord:          extraData.endWord          ?? "",
+        totalGraphWords:  extraData.totalGraphWords  ?? wordsUsed,
+        bestPathLength:   extraData.bestPathLength   ?? 0,
+        actualPath:       extraData.actualPath       ?? [],
+        wordsList:        extraData.wordsList        ?? [],
+        opponentUid:      extraData.opponentUid      ?? "",
+        opponentUsername: extraData.opponentUsername ?? "",
     };
 
     try {
         await push(ref(database, `users/${uid}/history`), historyEntry);
-        console.log("[account] rich match history entry appended");
+        console.log("[account] rich history entry appended");
     } catch (err) {
-        console.error("[account] match history append failed:", err);
+        console.error("[account] history append failed:", err);
     }
 
     return account;
 }
 
+// ============================================================
+// saveDailyStats
+// Called once when user completes today's puzzle.
+// ============================================================
 export async function saveDailyStats(uid, wordsUsed, pathLength) {
     const account = await loadAccount(uid);
     if (!account) return;
@@ -213,4 +236,8 @@ export function calcElo(playerElo, opponentElo, won) {
     const expected = 1 / (1 + Math.pow(10, (opponentElo - playerElo) / 400));
     const actual   = won ? 1 : 0;
     return Math.round(playerElo + K * (actual - expected));
+}
+
+export function calcEloDelta(playerElo, opponentElo, won) {
+    return calcElo(playerElo, opponentElo, won) - playerElo;
 }

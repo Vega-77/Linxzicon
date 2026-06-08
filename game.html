@@ -375,13 +375,16 @@
     // ── Auth guard ──
     await requireAuth();
 
+    // ── Show loading screen while embeddings download ──
+    document.getElementById("matchmaking-screen").classList.add("active");
+    document.getElementById("matchmaking-msg").textContent = "Loading vocabulary…";
+
     // ── Load embeddings ──
     try {
         await loadGlove("game/data/embeddings.bin");
     } catch (err) {
-        document.getElementById("status-msg").textContent =
+        document.getElementById("matchmaking-msg").textContent =
             "Failed to load embeddings — is game/data/embeddings.bin present?";
-        document.getElementById("status-msg").className = "error";
         console.error("[game.html] loadGlove failed:", err);
     }
 
@@ -662,7 +665,10 @@
                     const engine = getEngine();
                     const path   = engine.shortestPath(oppBoardState);
                     if (path) oppRenderer.setWinningPath(path);
-                    await gameSession.saveResult(false, opponentElo);
+                    await gameSession.saveResult(false, opponentElo, {
+                        opponentUid:      multiSession.opponentUid      ?? "",
+                        opponentUsername: multiSession.opponentUsername ?? "",
+                    });
                 }
 
                 showMultiResults(won, eloChange, gameSession.wordsAdded, gameSession.getElapsed());

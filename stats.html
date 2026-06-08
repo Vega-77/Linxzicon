@@ -148,8 +148,22 @@
             color: var(--text-muted);
             font-weight: 600;
         }
-        .badge-win { color: var(--emerald); font-weight: bold; }
-        .badge-loss { color: var(--rose); font-weight: bold; }
+        .row-win  td:first-child { border-left: 3px solid var(--green); }
+        .row-loss td:first-child { border-left: 3px solid var(--red); }
+        .result-win  { color: var(--green); font-weight: 600; }
+        .result-loss { color: var(--red);   font-weight: 600; }
+        .no-history { color: var(--text-muted); padding: 32px; text-align: center; }
+        .badge-win  { color: var(--emerald); font-weight: bold; }
+        .badge-loss { color: var(--rose);    font-weight: bold; }
+        .mode-badge {
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+        .mode-solo        { background: rgba(79,70,229,0.15); color: var(--indigo); }
+        .mode-multiplayer { background: rgba(245,158,11,0.15); color: var(--amber); }
+        .mode-daily       { background: rgba(16,185,129,0.15); color: var(--emerald); }
     </style>
 </head>
 <body>
@@ -228,8 +242,32 @@
         </div>
     </div>
 
+    <p class="section-title">📅 Daily</p>
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-value" id="stat-daily-played">—</div>
+            <div class="stat-label">Puzzles Solved</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value" id="stat-daily-streak" style="color:var(--gold)">—</div>
+            <div class="stat-label">Current Streak</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value" id="stat-daily-best-streak" style="color:var(--gold)">—</div>
+            <div class="stat-label">Best Streak</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value" id="stat-daily-avg-path" style="color:var(--accent)">—</div>
+            <div class="stat-label">Avg Path</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value" id="stat-daily-avg-words">—</div>
+            <div class="stat-label">Avg Words</div>
+        </div>
+    </div>
+
     <p class="section-title">📊 Deep Analytics Dashboard</p>
-    
+
     <div class="analytics-row">
         <div class="analytics-card">
             <h3>1. Elo Rating History</h3>
@@ -246,7 +284,7 @@
 
     <div class="analytics-row">
         <div class="analytics-card">
-            <h3>3 & 4. Word Deployment Metrics</h3>
+            <h3>3 &amp; 4. Word Deployment Metrics</h3>
             <div style="margin-bottom: 12px; text-align:center;">
                 <span style="font-size: 0.85rem; color: var(--text-muted);">Total Words Placed Across History:</span>
                 <div id="stat-total-words-used" style="font-size: 2rem; font-weight: bold; color: var(--amber);">0</div>
@@ -292,7 +330,7 @@
 
     <p class="section-title">📋 Recent Matches History</p>
     <div id="history-container" style="overflow-x: auto;">
-        <p class="no-history">Loading match log matrix…</p>
+        <p class="no-history">Loading match log…</p>
     </div>
 
 </div>
