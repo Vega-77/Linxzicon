@@ -32,7 +32,7 @@ export async function loadGlove(filepath = 'game/data/embeddings.bin') {
             throw new Error("Embeddings map is empty — the .bin file may be corrupt or wrong format");
         }
 
-        _engine = new LinxiconEngine(emb, { adaptiveK: 2.0 });
+        _engine = new LinxiconEngine(emb, { adaptiveK: 2.5 });
         console.log("[glove] engine ready, vocab size:", emb.size);
 
     } catch (err) {
