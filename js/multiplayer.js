@@ -33,9 +33,10 @@ export class MultiplayerSession {
         this._rematchStarted  = false;
         this._rematchNotified = false;
 
-        this._unsubGame    = null;
-        this._unsubQueue   = null;
-        this._unsubRematch = null;
+        this._unsubGame      = null;
+        this._unsubQueue     = null;
+        this._unsubQueueScan = null;
+        this._unsubRematch   = null;
     }
 
     // ----------------------------------------------------------
@@ -58,6 +59,7 @@ export class MultiplayerSession {
         // Store my info for use in game-over and rematch flows
         this.myElo      = account?.elo      ?? 1000;
         this.myUsername = account?.username ?? "Player";
+        this._myAccount = account;
 
         this.onMessage("Looking for an opponent…");
 
@@ -208,16 +210,19 @@ export class MultiplayerSession {
     // ----------------------------------------------------------
     _waitForGame() {
         const myQueueRef = ref(database, `queue/${this.myUid}`);
+        let _hosting = false; // guard: once we start hosting, ignore further queue events
 
+        // Primary: wait for a host to assign us a gameId
         this._unsubQueue = onValue(myQueueRef, async (snap) => {
-            if (!snap.exists()) return;
+            if (!snap.exists() || _hosting) return;
             const data = snap.val();
             if (!data.gameId) return;
 
             const gameId = data.gameId;
             this.gameId  = gameId;
 
-            if (this._unsubQueue) { this._unsubQueue(); this._unsubQueue = null; }
+            if (this._unsubQueue)      { this._unsubQueue();      this._unsubQueue      = null; }
+            if (this._unsubQueueScan)  { this._unsubQueueScan();  this._unsubQueueScan  = null; }
             try { await remove(myQueueRef); } catch (_) {}
 
             // Load the full game document
@@ -251,6 +256,46 @@ export class MultiplayerSession {
 
             this._initLocalBoard(game.startWord, game.endWord, this.opponentUsername);
             this._listenToGame();
+        });
+
+        // Secondary: scan the whole queue so we can claim a waiting peer and
+        // become the host — handles the race where both players arrived at the
+        // same time and both entered the waiting state before either could match.
+        this._unsubQueueScan = onValue(ref(database, "queue"), async (snap) => {
+            if (!snap.exists() || _hosting) return;
+            const entries = snap.val();
+
+            let bestKey = null, bestEntry = null, bestDiff = Infinity;
+            for (const [key, entry] of Object.entries(entries)) {
+                if (entry.uid === this.myUid) continue;
+                if (entry.gameId) continue; // already matched
+                const diff = Math.abs((entry.elo ?? 1000) - this.myElo);
+                if (diff < bestDiff) { bestDiff = diff; bestKey = key; bestEntry = entry; }
+            }
+
+            if (!bestKey) return;
+
+            // Try to atomically claim the slot
+            let committed = false;
+            try {
+                const result = await runTransaction(ref(database, `queue/${bestKey}`), (current) => {
+                    if (!current || current.gameId) return; // abort — taken
+                    return null; // claim by deleting
+                });
+                committed = result.committed;
+            } catch (_) {}
+
+            if (!committed) return;
+
+            _hosting = true;
+            if (this._unsubQueue)     { this._unsubQueue();     this._unsubQueue     = null; }
+            if (this._unsubQueueScan) { this._unsubQueueScan(); this._unsubQueueScan = null; }
+
+            // Remove ourselves from the queue before creating the game
+            try { await remove(myQueueRef); } catch (_) {}
+
+            console.log("[multi] waitForGame: claimed waiting peer, becoming host");
+            await this._createGame(this._myAccount, bestEntry);
         });
     }
 
@@ -482,13 +527,15 @@ export class MultiplayerSession {
     // cancelSearch / cleanup
     // ----------------------------------------------------------
     async cancelSearch() {
-        if (this._unsubQueue) { this._unsubQueue(); this._unsubQueue = null; }
+        if (this._unsubQueue)     { this._unsubQueue();     this._unsubQueue     = null; }
+        if (this._unsubQueueScan) { this._unsubQueueScan(); this._unsubQueueScan = null; }
         try { await remove(ref(database, `queue/${this.myUid}`)); } catch (_) {}
     }
 
     cleanup() {
-        if (this._unsubGame)    { this._unsubGame();    this._unsubGame    = null; }
-        if (this._unsubQueue)   { this._unsubQueue();   this._unsubQueue   = null; }
-        if (this._unsubRematch) { this._unsubRematch(); this._unsubRematch = null; }
+        if (this._unsubGame)      { this._unsubGame();      this._unsubGame      = null; }
+        if (this._unsubQueue)     { this._unsubQueue();     this._unsubQueue     = null; }
+        if (this._unsubQueueScan) { this._unsubQueueScan(); this._unsubQueueScan = null; }
+        if (this._unsubRematch)   { this._unsubRematch();   this._unsubRematch   = null; }
     }
 }
