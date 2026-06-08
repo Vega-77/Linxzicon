@@ -4,7 +4,7 @@
 // it gets back, so we can see exactly where stats break.
 // ============================================================
 
-import { database }                    from "./firebase-config.js";
+import { database, auth }              from "./firebase-config.js";
 import { ref, set, get, update, push } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
 
 const DEFAULT_ELO = 1000;
@@ -73,11 +73,9 @@ export class Account {
 // createAccount
 // ============================================================
 export async function createAccount(uid, username, email) {
-    console.log("[account] createAccount uid:", uid, "username:", username);
     const account = new Account({ uid, username, email });
     try {
         await set(ref(database, `users/${uid}`), account.toObject());
-        console.log("[account] createAccount write OK");
     } catch (err) {
         console.error("[account] createAccount write FAILED:", err);
         throw err;
@@ -89,16 +87,27 @@ export async function createAccount(uid, username, email) {
 // loadAccount
 // ============================================================
 export async function loadAccount(uid) {
-    console.log("[account] loadAccount uid:", uid);
     try {
         const snap = await get(ref(database, `users/${uid}`));
-        console.log("[account] loadAccount exists:", snap.exists(),
-            "val:", snap.exists() ? JSON.stringify(snap.val()).slice(0, 120) : "null");
-        if (!snap.exists()) return null;
+
+        if (!snap.exists()) {
+            // Profile missing — registration was interrupted before the DB write completed.
+            // Recreate a minimal profile from the current Auth user.
+            const user = auth.currentUser;
+            if (user) {
+                console.warn("[account] loadAccount: no profile found, creating default");
+                const account = new Account({
+                    uid,
+                    username: user.displayName ?? user.email.split("@")[0],
+                    email:    user.email,
+                });
+                await set(ref(database, `users/${uid}`), account.toObject());
+                return account;
+            }
+            return null;
+        }
+
         const account = new Account(snap.val());
-        console.log("[account] loadAccount parsed OK, username:", account.username,
-            "elo:", account.elo, "soloPlayed:", account.soloPlayed,
-            "multiPlayed:", account.multiPlayed);
         return account;
     } catch (err) {
         console.error("[account] loadAccount FAILED:", err);
@@ -113,7 +122,6 @@ export async function loadAccount(uid) {
 // ============================================================
 export async function saveGameResult(uid, won, wordsUsed, solveTime, opponentElo = null) {
     const isSolo = opponentElo === null;
-    console.log(`[account] saveGameResult uid:${uid} isSolo:${isSolo} won:${won} words:${wordsUsed} time:${solveTime} oppElo:${opponentElo}`);
     return isSolo
         ? _saveSoloResult(uid, won, wordsUsed, solveTime)
         : _saveMultiResult(uid, won, wordsUsed, solveTime, opponentElo);
@@ -135,16 +143,13 @@ async function _saveSoloResult(uid, won, wordsUsed, solveTime) {
             account.soloBestTime = solveTime;
     }
 
-    console.log("[account] _saveSoloResult writing:", JSON.stringify(account.toObject()).slice(0, 120));
     try {
         await update(ref(database, `users/${uid}`), account.toObject());
-        console.log("[account] _saveSoloResult profile update OK");
         const histRef = ref(database, `users/${uid}/history`);
         await push(histRef, {
             date: new Date().toISOString(), mode: "solo",
             won, wordsUsed, solveTime, eloAtTime: account.elo
         });
-        console.log("[account] _saveSoloResult history push OK");
     } catch (err) {
         console.error("[account] _saveSoloResult write FAILED:", err);
     }
@@ -170,25 +175,26 @@ async function _saveMultiResult(uid, won, wordsUsed, solveTime, opponentElo) {
         account.currentStreak = 0;
     }
 
-    account.elo = _calcElo(account.elo, opponentElo, won);
+    account.elo = calcElo(account.elo, opponentElo, won);
 
-    console.log("[account] _saveMultiResult writing:", JSON.stringify(account.toObject()).slice(0, 120));
     try {
         await update(ref(database, `users/${uid}`), account.toObject());
-        console.log("[account] _saveMultiResult profile update OK");
         await push(ref(database, `users/${uid}/history`), {
             date: new Date().toISOString(), mode: "multiplayer",
             won, wordsUsed, solveTime, eloAtTime: account.elo
         });
-        console.log("[account] _saveMultiResult history push OK");
     } catch (err) {
         console.error("[account] _saveMultiResult write FAILED:", err);
     }
     return account;
 }
 
-function _calcElo(playerElo, opponentElo, won) {
+export function calcElo(playerElo, opponentElo, won) {
     const K = 32;
     const expected = 1 / (1 + Math.pow(10, (opponentElo - playerElo) / 400));
     return Math.round(playerElo + K * ((won ? 1 : 0) - expected));
+}
+
+export function calcEloDelta(playerElo, opponentElo, won) {
+    return calcElo(playerElo, opponentElo, won) - playerElo;
 }
