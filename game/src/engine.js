@@ -25,6 +25,10 @@ export class LinxiconEngine {
   // Vocabulary queries
   // ---------------------------------------------------------------------------
 
+  setAdaptiveK(k) {
+    this._defaultK = k;
+  }
+
   hasWord(word) {
     return this._emb.has(word.toLowerCase());
   }

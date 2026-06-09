@@ -10,10 +10,12 @@
 //   - Saves results to Firebase via account.js
 // ============================================================
 
-import { Graph }          from "./graph.js";
-import { getEngine }      from "./glove.js";
-import { saveGameResult } from "./account.js";
-import { requireAuth }    from "./auth.js";
+import { Graph }             from "./graph.js";
+import { getEngine }         from "./glove.js";
+import { saveGameResult }    from "./account.js";
+import { requireAuth }       from "./auth.js";
+import { getConfig, onConfigChange } from "./game-config.js";
+import { isValidPairWord }   from "./word-filter.js";
 
 // ============================================================
 // GameSession
@@ -170,32 +172,55 @@ export class GameSession {
 }
 
 // ============================================================
-// pickDistantPair
-// Samples the full 200k vocabulary to find the most semantically
-// distant non-trivial pair each game — words far apart enough
-// to be challenging but still positively related (similarity ≥ 0.05)
-// so a connecting path exists through the word network.
-// Only the top PAIR_VOCAB_LIMIT words (by GloVe frequency) are eligible
-// as start/end words. Connecting words typed by the player are unlimited.
-const PAIR_VOCAB_LIMIT = 20000;
+// Filtered word pool — proper nouns / abbreviations stripped out.
+// Rebuilt when the Firebase config changes pairVocabLimit.
+// ============================================================
+let _filteredPool = null;
 
+function getFilteredPool() {
+    if (_filteredPool) return _filteredPool;
+    const engine = getEngine();
+    if (!engine) return [];
+    const { pairVocabLimit } = getConfig();
+    const all = engine.wordList(pairVocabLimit);
+    _filteredPool = all.filter((_, i) => isValidPairWord(i));
+    console.log(`[game] filtered pool: ${_filteredPool.length} valid words from top ${pairVocabLimit}`);
+    return _filteredPool;
+}
+
+// Invalidate pool when config changes so it rebuilds with new limit
+onConfigChange(() => { _filteredPool = null; });
+
+function pickRandom(n) {
+    const pool = getFilteredPool();
+    if (!pool.length) return [];
+    const out = [];
+    for (let i = 0; i < n; i++) out.push(pool[Math.floor(Math.random() * pool.length)]);
+    return out;
+}
+
+// ============================================================
+// pickDistantPair
+// Samples the filtered vocabulary (proper nouns removed) to find
+// the most semantically distant non-trivial pair each game.
+// pairVocabLimit and adaptiveK are live-tunable via Firebase
+// (config/game) without a redeploy.
 // ============================================================
 function pickDistantPair() {
     const engine = getEngine();
     if (!engine) return ["ocean", "forest"];
 
-    // Sample 30 random words; find the pair with lowest similarity
-    // that is non-trivial (not already directly connectable).
-    // Retry up to 3 times in case the sample is unlucky.
+    // Sample 30 random filtered words; find the pair with lowest similarity
+    // that is non-trivial (not directly connectable) but not too disconnected.
     for (let attempt = 0; attempt < 3; attempt++) {
-        const pool = engine.randomWords(30, PAIR_VOCAB_LIMIT);
+        const pool = pickRandom(30);
         let bestPair = null, bestSim = Infinity;
 
         for (let i = 0; i < pool.length; i++) {
             for (let j = i + 1; j < pool.length; j++) {
                 const info = engine.pairSimilarity(pool[i], pool[j]);
                 if (!info || info.isTrivial) continue;
-                if (info.similarity < 0.05) continue; // too disconnected
+                if (info.similarity < 0.05) continue;
                 if (info.similarity < bestSim) {
                     bestSim  = info.similarity;
                     bestPair = [pool[i], pool[j]];
@@ -206,14 +231,14 @@ function pickDistantPair() {
     }
 
     // Fallback: any non-trivial pair
-    const pool = engine.randomWords(20, PAIR_VOCAB_LIMIT);
+    const pool = pickRandom(20);
     for (let i = 0; i < pool.length; i++) {
         for (let j = i + 1; j < pool.length; j++) {
             const info = engine.pairSimilarity(pool[i], pool[j]);
             if (info && !info.isTrivial) return [pool[i], pool[j]];
         }
     }
-    return engine.randomWords(2, PAIR_VOCAB_LIMIT);
+    return pickRandom(2);
 }
 
 // ============================================================

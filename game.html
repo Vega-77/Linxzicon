@@ -402,6 +402,8 @@
     import { GameSession }          from "./js/game.js";
     import { MultiplayerSession }   from "./js/multiplayer.js";
     import { calcEloDelta }         from "./js/account.js";
+    import { initGameConfig,
+             getConfig, onConfigChange }      from "./js/game-config.js";
 
     // ── Mode from URL ──
     const params = new URLSearchParams(window.location.search);
@@ -411,6 +413,9 @@
 
     // ── Auth guard ──
     await requireAuth();
+
+    // ── Load Firebase game config (adaptiveK, pairVocabLimit, etc.) ──
+    initGameConfig();
 
     // ── Show loading screen and await embeddings ──
     document.getElementById("matchmaking-screen").classList.add("active");
@@ -433,6 +438,11 @@
     }
 
     if (embeddingsOk) { await (async () => { // ── game init (skipped if embeddings failed) ──
+
+    // Apply Firebase config to engine (K can change live without a redeploy)
+    const _applyConfig = ({ adaptiveK }) => getEngine()?.setAdaptiveK(adaptiveK);
+    _applyConfig(getConfig());
+    onConfigChange(_applyConfig);
 
     // Hide the panel that doesn't apply to this mode
     if (mode === "solo") {

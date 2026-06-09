@@ -7,6 +7,8 @@ import { requireAuth }    from "./auth.js";
 import { loadAccount }    from "./account.js";
 import { pickStartEnd }   from "./game.js";
 import { saveGameResult } from "./account.js";
+import { getConfig }      from "./game-config.js";
+import { isValidPairWord } from "./word-filter.js";
 
 const QUEUE_STALE_MS = 90_000; // skip queue entries older than 90 s
 
@@ -473,10 +475,14 @@ export class MultiplayerSession {
             return idx >= 0 && !state.edges.some(([i, j]) => i === idx || j === idx);
         });
 
-        const target  = isolated[0] ?? startWord;
-        const ordered = engine.wordList(15000);
+        const target = isolated[0] ?? startWord;
+        const { pairVocabLimit } = getConfig();
+        // Iterate from most-common to least-common valid word; first match wins
+        const allWords = engine.wordList(pairVocabLimit);
         let hint = null;
-        for (const w of ordered) {
+        for (let i = 0; i < allWords.length; i++) {
+            const w = allWords[i];
+            if (!isValidPairWord(i)) continue;
             if (state.words.includes(w)) continue;
             if (engine.pairSimilarity(w, target)?.isTrivial) { hint = w; break; }
         }
