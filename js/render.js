@@ -129,11 +129,6 @@ export class Renderer {
         const cx    = this.canvas.width  / 2;
         const cy    = this.canvas.height / 2;
 
-        // Skip physics when nodes have nearly stopped moving
-        let totalKE = 0;
-        for (const n of nodes) if (!n.pinned) totalKE += n.vx*n.vx + n.vy*n.vy;
-        if (totalKE < 0.05) return;
-
         for (let i = 0; i < nodes.length; i++) {
             for (let j = i + 1; j < nodes.length; j++) {
                 const a = nodes[i], b = nodes[j];
